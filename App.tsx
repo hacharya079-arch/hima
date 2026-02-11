@@ -13,7 +13,9 @@ import {
   Plus,
   MessageSquare,
   Key,
-  Globe
+  Globe,
+  Monitor,
+  Edit3
 } from 'lucide-react';
 import DashboardHeader from './components/DashboardHeader';
 import StreamPlayer from './components/StreamPlayer';
@@ -30,7 +32,8 @@ const MOCK_STREAMS: StreamSession[] = [
     startTime: new Date().toISOString(),
     rtmpUrl: 'rtmp://154.12.88.2/live',
     streamKey: 'alex_secure_123',
-    thumbnailUrl: 'https://picsum.photos/seed/coding/800/450'
+    thumbnailUrl: 'https://picsum.photos/seed/coding/800/450',
+    resolution: '1080p'
   },
   {
     id: '2',
@@ -41,14 +44,18 @@ const MOCK_STREAMS: StreamSession[] = [
     startTime: new Date().toISOString(),
     rtmpUrl: 'rtmp://154.12.88.2/live',
     streamKey: 'tournament_alpha',
-    thumbnailUrl: 'https://picsum.photos/seed/gaming/800/450'
+    thumbnailUrl: 'https://picsum.photos/seed/gaming/800/450',
+    resolution: '4K'
   }
 ];
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'settings'>('dashboard');
   const [streams, setStreams] = useState<StreamSession[]>(MOCK_STREAMS);
-  const [serverIp, setServerIp] = useState<string>('Loading...');
+  const [detectedIp, setDetectedIp] = useState<string>('Detecting...');
+  const [manualIp, setManualIp] = useState<string>('');
+  const [useManualIp, setUseManualIp] = useState<boolean>(false);
+  
   const [stats, setStats] = useState<StreamStats>({
     cpuUsage: 12.5,
     memoryUsage: 4.2,
@@ -56,20 +63,25 @@ const App: React.FC = () => {
     totalBandwidth: '124.5 Mbps'
   });
   const [isGeneratingKey, setIsGeneratingKey] = useState(false);
-  const [newStreamData, setNewStreamData] = useState({ title: '', broadcaster: '', streamKey: '' });
+  const [newStreamData, setNewStreamData] = useState({ 
+    title: '', 
+    broadcaster: '', 
+    streamKey: '',
+    resolution: '1080p' as StreamSession['resolution']
+  });
   const [aiSuggestions, setAiSuggestions] = useState<any>(null);
+
+  const effectiveIp = useManualIp && manualIp ? manualIp : detectedIp;
 
   // Simulate automatic VPS IP detection
   useEffect(() => {
     const detectIp = async () => {
       try {
-        // In a real VPS environment, this would be the actual public IP
-        // Here we simulate a fetch to an IP detection service
         const response = await fetch('https://api.ipify.org?format=json');
         const data = await response.json();
-        setServerIp(data.ip);
+        setDetectedIp(data.ip);
       } catch (e) {
-        setServerIp('154.12.88.2'); // Fallback mock IP
+        setDetectedIp('154.12.88.2'); // Fallback mock IP
       }
     };
     detectIp();
@@ -101,13 +113,14 @@ const App: React.FC = () => {
       viewers: 0,
       status: 'offline',
       startTime: new Date().toISOString(),
-      rtmpUrl: `rtmp://${serverIp}/live`,
+      rtmpUrl: `rtmp://${effectiveIp}/live`,
       streamKey: newStreamData.streamKey,
-      thumbnailUrl: `https://picsum.photos/seed/${Math.random()}/800/450`
+      thumbnailUrl: `https://picsum.photos/seed/${Math.random()}/800/450`,
+      resolution: newStreamData.resolution
     };
 
     setStreams([newStream, ...streams]);
-    setNewStreamData({ title: '', broadcaster: '', streamKey: '' });
+    setNewStreamData({ title: '', broadcaster: '', streamKey: '', resolution: '1080p' });
     setIsGeneratingKey(false);
 
     const suggestions = await analyzeStreamContext(newStream.title, newStream.broadcaster);
@@ -145,11 +158,16 @@ const App: React.FC = () => {
           </button>
 
           <div className="mt-8 pt-8 border-t border-zinc-800">
-            <h4 className="px-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4">Auto-Detected VPS</h4>
+            <h4 className="px-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4">Active VPS Ingest</h4>
             <div className="px-4 mb-6">
-              <div className="flex items-center gap-2 text-xs text-zinc-300 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
-                <Globe className="w-3.5 h-3.5 text-blue-500" />
-                <span className="font-mono">{serverIp}</span>
+              <div className="flex flex-col gap-1 text-xs text-zinc-300 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="font-mono">{effectiveIp}</span>
+                </div>
+                <span className="text-[9px] text-zinc-500 uppercase tracking-tighter">
+                  {useManualIp ? 'Manual Override' : 'Auto-Detected'}
+                </span>
               </div>
             </div>
 
@@ -173,12 +191,6 @@ const App: React.FC = () => {
                     <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${(stats.memoryUsage / 16) * 100}%` }} />
                  </div>
                </div>
-               <div>
-                 <div className="flex justify-between text-xs mb-1.5">
-                   <span className="text-zinc-400 flex items-center gap-1"><RefreshCcw className="w-3 h-3"/> Bandwidth</span>
-                   <span className="text-zinc-200">{stats.totalBandwidth}</span>
-                 </div>
-               </div>
             </div>
           </div>
         </aside>
@@ -194,57 +206,65 @@ const App: React.FC = () => {
                   <PlusCircle className="w-5 h-5 text-blue-500" />
                   <h2 className="text-xl font-bold">Create Broadcaster Access</h2>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-tighter">Broadcaster Name</label>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase">Broadcaster</label>
                     <input 
                       type="text" 
-                      placeholder="e.g. creative_pixel"
+                      placeholder="Name"
                       value={newStreamData.broadcaster}
                       onChange={(e) => setNewStreamData(prev => ({ ...prev, broadcaster: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-tighter">Stream Title</label>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase">Title</label>
                     <input 
                       type="text" 
-                      placeholder="e.g. Design Stream"
+                      placeholder="Stream Title"
                       value={newStreamData.title}
                       onChange={(e) => setNewStreamData(prev => ({ ...prev, title: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-tighter">Custom Password (Key)</label>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                      <input 
-                        type="text" 
-                        placeholder="e.g. my-secure-pwd-2024"
-                        value={newStreamData.streamKey}
-                        onChange={(e) => setNewStreamData(prev => ({ ...prev, streamKey: e.target.value }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
-                      />
-                    </div>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase">Password (Key)</label>
+                    <input 
+                      type="text" 
+                      placeholder="Secret Key"
+                      value={newStreamData.streamKey}
+                      onChange={(e) => setNewStreamData(prev => ({ ...prev, streamKey: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase">Resolution</label>
+                    <select 
+                      value={newStreamData.resolution}
+                      onChange={(e) => setNewStreamData(prev => ({ ...prev, resolution: e.target.value as StreamSession['resolution'] }))}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all appearance-none cursor-pointer"
+                    >
+                      <option value="720p">720p HD</option>
+                      <option value="1080p">1080p Full HD</option>
+                      <option value="2K">2K QHD</option>
+                      <option value="4K">4K Ultra HD</option>
+                    </select>
                   </div>
                   <div className="flex items-end">
                     <button 
                       onClick={handleGenerateKey}
                       disabled={isGeneratingKey || !newStreamData.title || !newStreamData.broadcaster || !newStreamData.streamKey}
-                      className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-900/40"
+                      className="w-full h-[38px] bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-900/40"
                     >
-                      {isGeneratingKey ? <RefreshCcw className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
-                      Add Broadcaster
+                      {isGeneratingKey ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                      Add
                     </button>
                   </div>
                 </div>
 
                 {aiSuggestions && (
-                  <div className="mt-6 p-4 bg-blue-600/10 border border-blue-500/20 rounded-xl flex items-start gap-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div className="bg-blue-600 p-2 rounded-lg">
-                      <MessageSquare className="w-5 h-5 text-white" />
-                    </div>
+                  <div className="mt-6 p-4 bg-blue-600/10 border border-blue-500/20 rounded-xl flex items-start gap-4">
+                    <MessageSquare className="w-5 h-5 text-blue-500 shrink-0 mt-1" />
                     <div className="space-y-1">
                       <h4 className="text-sm font-bold text-blue-400">Gemini AI Stream Suggestion</h4>
                       <p className="text-xs text-zinc-300 leading-relaxed">{aiSuggestions.description}</p>
@@ -289,36 +309,81 @@ const App: React.FC = () => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 space-y-8">
                <div>
                   <h2 className="text-2xl font-bold mb-2">Global Infrastructure</h2>
-                  <p className="text-zinc-400 text-sm">Automated VPS settings and server identification.</p>
+                  <p className="text-zinc-400 text-sm">Configure VPS identification and manual IP overrides.</p>
                </div>
 
                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-4">
-                    <h3 className="font-bold text-zinc-200">Ingest Server (Auto-Detected)</h3>
-                    <div className="space-y-2">
-                       <label className="text-xs font-bold text-zinc-500 uppercase">Public VPS IP</label>
-                       <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm font-mono text-blue-400 flex justify-between items-center">
-                          {serverIp}
-                          <span className="text-[10px] bg-green-500/20 text-green-500 px-2 py-0.5 rounded-full font-sans uppercase">Active</span>
-                       </div>
-                    </div>
-                    <div className="space-y-2">
-                       <label className="text-xs font-bold text-zinc-500 uppercase">Main RTMP Endpoint</label>
-                       <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm font-mono text-zinc-400">
-                          rtmp://{serverIp}/live
-                       </div>
+                  <div className="space-y-6">
+                    <h3 className="font-bold text-zinc-200 flex items-center gap-2">
+                      <Globe className="w-4 h-4 text-blue-500" /> 
+                      IP Address Management
+                    </h3>
+                    
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+                        <div>
+                          <p className="text-sm font-bold">Manual IP Override</p>
+                          <p className="text-xs text-zinc-500">Enable this to set a custom VPS address</p>
+                        </div>
+                        <button 
+                          onClick={() => setUseManualIp(!useManualIp)}
+                          className={`w-10 h-5 rounded-full flex items-center px-1 transition-colors ${useManualIp ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                        >
+                          <div className={`w-3.5 h-3.5 bg-white rounded-full transition-transform ${useManualIp ? 'translate-x-5' : 'translate-x-0'}`} />
+                        </button>
+                      </div>
+
+                      {useManualIp && (
+                        <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                           <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1">
+                             <Edit3 className="w-3 h-3" /> Custom VPS IP Address
+                           </label>
+                           <input 
+                              type="text"
+                              value={manualIp}
+                              onChange={(e) => setManualIp(e.target.value)}
+                              placeholder="e.g. 1.2.3.4"
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm font-mono text-blue-400 focus:ring-2 focus:ring-blue-500/50 outline-none"
+                           />
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-bold text-zinc-500 uppercase">Auto-Detected IP</label>
+                         <div className="bg-zinc-950/50 border border-zinc-800 rounded-lg p-3 text-sm font-mono text-zinc-500">
+                            {detectedIp}
+                         </div>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="space-y-4">
-                    <h3 className="font-bold text-zinc-200">Security Policies</h3>
-                    <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
-                      <div>
-                        <p className="text-sm font-bold">Admin-Defined Keys Only</p>
-                        <p className="text-xs text-zinc-500">Prevent unauthorized stream creation</p>
+                  <div className="space-y-6">
+                    <h3 className="font-bold text-zinc-200 flex items-center gap-2">
+                      <Monitor className="w-4 h-4 text-emerald-500" />
+                      Streaming Defaults
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-3">
+                         <p className="text-sm font-bold">Default Transcode Resolution</p>
+                         <div className="flex gap-2">
+                           {['720p', '1080p', '2K', '4K'].map(res => (
+                             <button 
+                               key={res}
+                               className={`px-3 py-1 text-[10px] font-bold rounded border transition-all ${res === '1080p' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-500' : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                             >
+                               {res}
+                             </button>
+                           ))}
+                         </div>
                       </div>
-                      <div className="w-10 h-5 bg-blue-600 rounded-full flex items-center px-1">
-                        <div className="w-3.5 h-3.5 bg-white rounded-full ml-auto shadow-sm" />
+                      <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+                        <div>
+                          <p className="text-sm font-bold">Multi-Quality HLS</p>
+                          <p className="text-xs text-zinc-500">Generate multiple variants automatically</p>
+                        </div>
+                        <div className="w-10 h-5 bg-blue-600 rounded-full flex items-center px-1">
+                          <div className="w-3.5 h-3.5 bg-white rounded-full ml-auto" />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -328,7 +393,6 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Footer Branding */}
       <footer className="border-t border-zinc-900 bg-zinc-950/50 py-8 px-8 text-center mt-auto">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-sm text-zinc-500">© 2024 StreamPulse Media Systems. Automated VPS RTMP Hub.</p>

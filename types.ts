@@ -9,6 +9,7 @@ export interface StreamSession {
   rtmpUrl: string;
   streamKey: string;
   thumbnailUrl: string;
+  resolution: '720p' | '1080p' | '2K' | '4K';
 }
 
 export interface StreamStats {

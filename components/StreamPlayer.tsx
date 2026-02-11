@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Play, Maximize, Volume2, Users, Radio, Copy, Check, Lock, Globe } from 'lucide-react';
+import { Play, Maximize, Volume2, Users, Radio, Copy, Check, Lock, Globe, Monitor } from 'lucide-react';
 import { StreamSession } from '../types';
 
 interface StreamPlayerProps {
@@ -35,7 +35,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({ stream }) => {
         ) : (
           <div className="text-zinc-600 flex flex-col items-center">
             <Radio className="w-12 h-12 mb-2 opacity-20" />
-            <span className="font-bold text-sm tracking-widest">OFFLINE</span>
+            <span className="font-bold text-sm tracking-widest uppercase">Off-Air</span>
           </div>
         )}
         
@@ -58,11 +58,17 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({ stream }) => {
 
         {/* Live Badge */}
         {stream.status === 'live' && (
-          <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1 bg-red-600 rounded text-[10px] font-bold tracking-widest uppercase">
+          <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1 bg-red-600 rounded text-[10px] font-bold tracking-widest uppercase shadow-lg">
             <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />
             LIVE
           </div>
         )}
+
+        {/* Resolution Badge */}
+        <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[10px] font-bold text-zinc-300 flex items-center gap-1.5 border border-white/10">
+          <Monitor className="w-3 h-3 text-blue-400" />
+          {stream.resolution}
+        </div>
       </div>
 
       {/* Info Section */}
@@ -78,7 +84,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({ stream }) => {
           </div>
         </div>
 
-        {/* RTMP Info - Admin/Broadcaster Details */}
+        {/* RTMP Info */}
         <div className="mt-auto space-y-2 pt-4 border-t border-zinc-800">
             <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight flex items-center gap-1">
               <Globe className="w-3 h-3" /> RTMP Server URL
