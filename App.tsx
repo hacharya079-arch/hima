@@ -20,10 +20,12 @@ import {
   Laptop,
   AlertTriangle,
   X,
-  Network
+  Network,
+  Terminal
 } from 'lucide-react';
 import DashboardHeader from './components/DashboardHeader';
 import StreamPlayer from './components/StreamPlayer';
+import DeploymentGuide from './components/DeploymentGuide';
 import { StreamSession, StreamStats, ChatMessage } from './types';
 import { analyzeStreamContext } from './services/geminiService';
 
@@ -59,7 +61,7 @@ const MOCK_STREAMS: StreamSession[] = [
 export type IPMode = 'auto' | 'lan' | 'loopback' | 'manual';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'settings' | 'deploy'>('dashboard');
   const [streams, setStreams] = useState<StreamSession[]>(MOCK_STREAMS);
   
   // IP Management State
@@ -217,6 +219,13 @@ const App: React.FC = () => {
           >
             <Tv className="w-5 h-5" />
             Public Viewers
+          </button>
+          <button 
+            onClick={() => setActiveTab('deploy')}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'deploy' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+          >
+            <Terminal className="w-5 h-5" />
+            VPS Setup
           </button>
           <button 
             onClick={() => setActiveTab('settings')}
@@ -402,6 +411,8 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
+
+          {activeTab === 'deploy' && <DeploymentGuide />}
 
           {activeTab === 'settings' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 space-y-8">
