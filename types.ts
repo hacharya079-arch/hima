@@ -10,6 +10,7 @@ export interface StreamSession {
   streamKey: string;
   thumbnailUrl: string;
   resolution: '720p' | '1080p' | '2K' | '4K';
+  ingestIp: string;
 }
 
 export interface StreamStats {
