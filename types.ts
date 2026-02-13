@@ -11,6 +11,8 @@ export interface StreamSession {
   thumbnailUrl: string;
   resolution: '720p' | '1080p' | '2K' | '4K';
   ingestIp: string;
+  bitrate?: number; // in Kbps
+  codec?: 'H.264' | 'H.265' | 'AV1';
 }
 
 export interface StreamStats {
