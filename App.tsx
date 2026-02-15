@@ -23,7 +23,10 @@ import {
   Network,
   Terminal,
   Image as ImageIcon,
-  Sparkles
+  Sparkles,
+  Calendar,
+  Clock,
+  ListRestart
 } from 'lucide-react';
 import DashboardHeader from './components/DashboardHeader';
 import StreamPlayer from './components/StreamPlayer';
@@ -88,7 +91,10 @@ const App: React.FC = () => {
     broadcaster: '', 
     streamKey: '',
     thumbnailUrl: '',
-    resolution: '1080p' as StreamSession['resolution']
+    resolution: '1080p' as StreamSession['resolution'],
+    isScheduled: false,
+    scheduledDate: '',
+    scheduledTime: ''
   });
   const [aiSuggestions, setAiSuggestions] = useState<any>(null);
 
@@ -139,13 +145,13 @@ const App: React.FC = () => {
         ...prev,
         cpuUsage: Math.min(100, Math.max(0, prev.cpuUsage + (Math.random() - 0.5) * 2)),
         memoryUsage: Math.min(16, Math.max(0, prev.memoryUsage + (Math.random() - 0.5) * 0.1)),
-        activeStreams: streams.length
+        activeStreams: streams.filter(s => s.status === 'live').length
       }));
     }, 3000);
     return () => clearInterval(interval);
   }, [streams.length]);
 
-  const handleGenerateKey = async () => {
+  const handleCreateStream = async () => {
     if (!newStreamData.title || !newStreamData.broadcaster || !newStreamData.streamKey) return;
     
     setIsGeneratingKey(true);
@@ -156,14 +162,16 @@ const App: React.FC = () => {
     }
     
     const ingestIp = getEffectiveIp(creationIpMode);
+    const scheduledStart = newStreamData.isScheduled ? `${newStreamData.scheduledDate}T${newStreamData.scheduledTime}:00` : undefined;
     
     const newStream: StreamSession = {
       id: Math.random().toString(36).substr(2, 9),
       title: newStreamData.title,
       broadcaster: newStreamData.broadcaster,
       viewers: 0,
-      status: 'offline',
+      status: newStreamData.isScheduled ? 'scheduled' : 'offline',
       startTime: new Date().toISOString(),
+      scheduledStart: scheduledStart,
       rtmpUrl: `rtmp://${ingestIp}/live`,
       streamKey: newStreamData.streamKey,
       thumbnailUrl: finalThumbnail,
@@ -174,7 +182,16 @@ const App: React.FC = () => {
     };
 
     setStreams([newStream, ...streams]);
-    setNewStreamData({ title: '', broadcaster: '', streamKey: '', thumbnailUrl: '', resolution: '1080p' });
+    setNewStreamData({ 
+      title: '', 
+      broadcaster: '', 
+      streamKey: '', 
+      thumbnailUrl: '', 
+      resolution: '1080p',
+      isScheduled: false,
+      scheduledDate: '',
+      scheduledTime: ''
+    });
     setIsGeneratingKey(false);
 
     const suggestions = await analyzeStreamContext(newStream.title, newStream.broadcaster);
@@ -199,6 +216,10 @@ const App: React.FC = () => {
   const handleRegenerateKey = (id: string) => {
     const newKey = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
     setStreams(prev => prev.map(s => s.id === id ? { ...s, streamKey: newKey } : s));
+  };
+
+  const handleGoLive = (id: string) => {
+    setStreams(prev => prev.map(s => s.id === id ? { ...s, status: 'live' } : s));
   };
 
   const handleUpdateStreamIpMode = (id: string, mode: IPMode) => {
@@ -247,6 +268,9 @@ const App: React.FC = () => {
       </button>
     </>
   );
+
+  const liveStreams = streams.filter(s => s.status === 'live');
+  const scheduledStreams = streams.filter(s => s.status === 'scheduled');
 
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col relative overflow-x-hidden pb-20 lg:pb-0">
@@ -305,9 +329,25 @@ const App: React.FC = () => {
           {activeTab === 'dashboard' && (
             <>
               <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-sm">
-                <div className="flex items-center gap-2 mb-6">
-                  <PlusCircle className="w-5 h-5 text-blue-500" />
-                  <h2 className="text-xl font-bold">Create Ingest Point</h2>
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <PlusCircle className="w-5 h-5 text-blue-500" />
+                    <h2 className="text-xl font-bold">Create Ingest Point</h2>
+                  </div>
+                  <div className="flex items-center gap-2 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                     <button 
+                        onClick={() => setNewStreamData(prev => ({ ...prev, isScheduled: false }))}
+                        className={`px-3 py-1 rounded text-[10px] font-bold uppercase transition-all ${!newStreamData.isScheduled ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
+                     >
+                       Now
+                     </button>
+                     <button 
+                        onClick={() => setNewStreamData(prev => ({ ...prev, isScheduled: true }))}
+                        className={`px-3 py-1 rounded text-[10px] font-bold uppercase transition-all ${newStreamData.isScheduled ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
+                     >
+                       Later
+                     </button>
+                  </div>
                 </div>
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -316,7 +356,7 @@ const App: React.FC = () => {
                       <input 
                         type="text" placeholder="Name" value={newStreamData.broadcaster}
                         onChange={(e) => setNewStreamData(prev => ({ ...prev, broadcaster: e.target.value }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -324,7 +364,7 @@ const App: React.FC = () => {
                       <input 
                         type="text" placeholder="Stream Title" value={newStreamData.title}
                         onChange={(e) => setNewStreamData(prev => ({ ...prev, title: e.target.value }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -332,7 +372,7 @@ const App: React.FC = () => {
                       <input 
                         type="text" placeholder="Password" value={newStreamData.streamKey}
                         onChange={(e) => setNewStreamData(prev => ({ ...prev, streamKey: e.target.value }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
                       />
                     </div>
                   </div>
@@ -352,16 +392,17 @@ const App: React.FC = () => {
                         <input 
                           type="text" placeholder="https://..." value={newStreamData.thumbnailUrl}
                           onChange={(e) => setNewStreamData(prev => ({ ...prev, thumbnailUrl: e.target.value }))}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
                         />
                       </div>
                     </div>
+                    
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Resolution</label>
                       <select 
                         value={newStreamData.resolution}
                         onChange={(e) => setNewStreamData(prev => ({ ...prev, resolution: e.target.value as StreamSession['resolution'] }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100"
                       >
                         <option value="720p">720p HD</option>
                         <option value="1080p">1080p FHD</option>
@@ -369,12 +410,13 @@ const App: React.FC = () => {
                         <option value="4K">4K UHD</option>
                       </select>
                     </div>
+
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Network</label>
                       <select 
                         value={creationIpMode}
                         onChange={(e) => setCreationIpMode(e.target.value as IPMode)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100"
                       >
                         <option value="auto">Public (WAN)</option>
                         <option value="lan">LAN (Local)</option>
@@ -384,13 +426,39 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
+                  {newStreamData.isScheduled && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 animate-in fade-in slide-in-from-top-2">
+                       <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-2">
+                            <Calendar className="w-3 h-3 text-blue-500" /> Start Date
+                          </label>
+                          <input 
+                            type="date" value={newStreamData.scheduledDate}
+                            onChange={(e) => setNewStreamData(prev => ({ ...prev, scheduledDate: e.target.value }))}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
+                          />
+                       </div>
+                       <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-2">
+                            <Clock className="w-3 h-3 text-blue-500" /> Start Time
+                          </label>
+                          <input 
+                            type="time" value={newStreamData.scheduledTime}
+                            onChange={(e) => setNewStreamData(prev => ({ ...prev, scheduledTime: e.target.value }))}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
+                          />
+                       </div>
+                    </div>
+                  )}
+
                   <div className="flex justify-end pt-2">
                     <button 
-                      onClick={handleGenerateKey}
-                      disabled={isGeneratingKey || !newStreamData.title || !newStreamData.broadcaster || !newStreamData.streamKey}
+                      onClick={handleCreateStream}
+                      disabled={isGeneratingKey || !newStreamData.title || !newStreamData.broadcaster || !newStreamData.streamKey || (newStreamData.isScheduled && (!newStreamData.scheduledDate || !newStreamData.scheduledTime))}
                       className="w-full md:w-48 h-[42px] bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2"
                     >
-                      {isGeneratingKey ? <><RefreshCcw className="w-4 h-4 animate-spin" /> Saving...</> : <><Plus className="w-4 h-4" /> Create Stream</>}
+                      {isGeneratingKey ? <><RefreshCcw className="w-4 h-4 animate-spin" /> Processing...</> : 
+                        newStreamData.isScheduled ? <><Calendar className="w-4 h-4" /> Schedule Stream</> : <><Plus className="w-4 h-4" /> Create Stream</>}
                     </button>
                   </div>
                 </div>
@@ -405,9 +473,21 @@ const App: React.FC = () => {
               </section>
 
               <section className="space-y-6">
-                <div className="flex items-center gap-2">
-                  <Tv className="w-5 h-5 text-red-500" />
-                  <h2 className="text-xl font-bold">Manage Broadcasts</h2>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Tv className="w-5 h-5 text-red-500" />
+                    <h2 className="text-xl font-bold">Manage Broadcasts</h2>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 uppercase">
+                      <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                      {liveStreams.length} Live
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 uppercase">
+                      <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                      {scheduledStreams.length} Scheduled
+                    </div>
+                  </div>
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
@@ -419,6 +499,7 @@ const App: React.FC = () => {
                       onUpdateIpMode={(mode) => handleUpdateStreamIpMode(stream.id, mode as IPMode)}
                       onUpdateQuality={(bitrate, codec) => handleUpdateQuality(stream.id, bitrate, codec)}
                       onRegenerateKey={() => handleRegenerateKey(stream.id)}
+                      onGoLive={() => handleGoLive(stream.id)}
                     />
                   ))}
                 </div>

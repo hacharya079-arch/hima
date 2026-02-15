@@ -33,7 +33,10 @@ import {
   Smartphone,
   Info,
   RefreshCcw,
-  AlertTriangle
+  AlertTriangle,
+  Calendar,
+  Clock,
+  Rocket
 } from 'lucide-react';
 import { StreamSession } from '../types';
 
@@ -44,6 +47,7 @@ interface StreamPlayerProps {
   onUpdateIpMode?: (mode: string) => void;
   onUpdateQuality?: (bitrate: number, codec: StreamSession['codec']) => void;
   onRegenerateKey?: () => void;
+  onGoLive?: () => void;
 }
 
 const StreamPlayer: React.FC<StreamPlayerProps> = ({ 
@@ -52,7 +56,8 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
   onUpdateResolution, 
   onUpdateIpMode,
   onUpdateQuality,
-  onRegenerateKey
+  onRegenerateKey,
+  onGoLive
 }) => {
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -70,11 +75,12 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
   
   const [latency, setLatency] = useState(24);
   const [droppedFrames, setDroppedFrames] = useState(0.0);
+  const [timeUntilStart, setTimeUntilStart] = useState<string>('');
 
   const [bitrate, setBitrate] = useState(stream.bitrate || 4500);
   const [codec, setCodec] = useState<StreamSession['codec']>(stream.codec || 'H.264');
 
-  // Derive alternative URLs (assuming standard Nginx RTMP module paths)
+  // Derive alternative URLs
   const rtmpPlayback = `${stream.rtmpUrl}/${stream.streamKey}`;
   const baseHttp = stream.rtmpUrl.replace('rtmp://', 'http://').split('/')[0];
   const hlsUrl = `http://${baseHttp}/hls/${stream.streamKey}.m3u8`;
@@ -106,6 +112,37 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
     }
     return () => clearInterval(interval);
   }, [stream.status, isPlaying, volume, isMonitoring]);
+
+  useEffect(() => {
+    if (stream.status === 'scheduled' && stream.scheduledStart) {
+      const updateCountdown = () => {
+        const now = new Date();
+        const start = new Date(stream.scheduledStart!);
+        const diff = start.getTime() - now.getTime();
+
+        if (diff <= 0) {
+          setTimeUntilStart('Starting soon...');
+          return;
+        }
+
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        
+        if (days > 0) {
+          setTimeUntilStart(`${days}d ${hours}h`);
+        } else if (hours > 0) {
+          setTimeUntilStart(`${hours}h ${mins}m`);
+        } else {
+          setTimeUntilStart(`${mins}m remaining`);
+        }
+      };
+
+      updateCountdown();
+      const interval = setInterval(updateCountdown, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [stream.status, stream.scheduledStart]);
 
   const copyToClipboard = (text: string, type: 'url' | 'key' | 'rtmp' | 'hls' | 'dash') => {
     navigator.clipboard.writeText(text);
@@ -158,7 +195,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
   const isLocal = stream.ingestIp === '127.0.0.1' || stream.ingestIp.startsWith('192.168.') || stream.ingestIp.startsWith('10.');
 
   return (
-    <div className={`bg-zinc-900 rounded-xl overflow-hidden border transition-all group shadow-xl flex flex-col h-full relative ${isMonitoring ? 'ring-2 ring-blue-500 border-blue-500/50' : 'border-zinc-800 hover:border-zinc-700'}`}>
+    <div className={`bg-zinc-900 rounded-xl overflow-hidden border transition-all group shadow-xl flex flex-col h-full relative ${isMonitoring ? 'ring-2 ring-blue-500 border-blue-500/50' : 'border-zinc-800 hover:border-zinc-700'} ${stream.status === 'scheduled' ? 'opacity-90' : ''}`}>
       {/* Video Container */}
       <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden shrink-0">
         {stream.status === 'live' ? (
@@ -174,6 +211,23 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
               </div>
             )}
           </div>
+        ) : stream.status === 'scheduled' ? (
+          <div className="relative w-full h-full overflow-hidden">
+            <img 
+              src={stream.thumbnailUrl} 
+              alt={stream.title} 
+              className="w-full h-full object-cover opacity-30 scale-100 grayscale-[0.8]"
+            />
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-blue-900/10 backdrop-blur-[2px]">
+              <Calendar className="w-8 h-8 text-blue-400 mb-2 opacity-60" />
+              <div className="px-3 py-1 bg-blue-500/20 rounded-full border border-blue-500/30">
+                <span className="text-[10px] font-bold text-blue-300 uppercase tracking-[0.2em]">{timeUntilStart || 'Scheduled'}</span>
+              </div>
+              <p className="mt-2 text-[9px] text-zinc-500 font-medium">
+                {new Date(stream.scheduledStart!).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="text-zinc-600 flex flex-col items-center">
             <Radio className="w-10 h-10 sm:w-12 sm:h-12 mb-2 opacity-20" />
@@ -185,20 +239,33 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3 sm:p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 sm:gap-3">
-              <button 
-                onClick={handlePlayToggle}
-                className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors"
-              >
-                {isPlaying ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />}
-              </button>
+              {stream.status === 'live' && (
+                <button 
+                  onClick={handlePlayToggle}
+                  className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors"
+                >
+                  {isPlaying ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />}
+                </button>
+              )}
               
-              <button 
-                onClick={(e) => { e.stopPropagation(); setIsMonitoring(!isMonitoring); }}
-                className={`p-2 rounded-full transition-all flex items-center gap-1 sm:gap-2 ${isMonitoring ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/40' : 'bg-white/10 text-white hover:bg-white/20'}`}
-              >
-                <Headphones className="w-4 h-4 sm:w-5 sm:h-5" />
-                {isMonitoring && <span className="text-[8px] sm:text-[10px] font-bold pr-1 animate-in fade-in slide-in-from-left-1 uppercase">Monitor</span>}
-              </button>
+              {stream.status === 'scheduled' && onGoLive && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onGoLive(); }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-all flex items-center gap-2 shadow-lg shadow-blue-900/40 text-xs font-bold uppercase tracking-wider"
+                >
+                  <Rocket className="w-4 h-4" /> Go Live Now
+                </button>
+              )}
+
+              {stream.status === 'live' && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setIsMonitoring(!isMonitoring); }}
+                  className={`p-2 rounded-full transition-all flex items-center gap-1 sm:gap-2 ${isMonitoring ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/40' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                >
+                  <Headphones className="w-4 h-4 sm:w-5 sm:h-5" />
+                  {isMonitoring && <span className="text-[8px] sm:text-[10px] font-bold pr-1 animate-in fade-in slide-in-from-left-1 uppercase">Monitor</span>}
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-2">
                {onRemove && (
@@ -226,9 +293,15 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
                 {isPlaying ? 'LIVE' : 'PAUSE'}
               </div>
             )}
+            {stream.status === 'scheduled' && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 sm:px-3 sm:py-1 bg-blue-600/90 text-white rounded text-[8px] sm:text-[10px] font-bold tracking-widest uppercase shadow-lg border border-blue-400/20">
+                <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                SOON
+              </div>
+            )}
             {isEncrypted && (
               <div className="flex items-center gap-1 px-2 py-0.5 sm:px-3 sm:py-1 bg-emerald-600/90 text-white rounded text-[8px] sm:text-[10px] font-bold tracking-widest uppercase shadow-lg">
-                <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                <ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                 SECURE
               </div>
             )}
@@ -277,10 +350,12 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
             </div>
           </div>
           <div className="flex flex-col items-end gap-1.5 sm:gap-2 shrink-0">
-            <div className="flex items-center gap-1 text-zinc-400 bg-zinc-800 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-[9px] sm:text-[10px] font-bold">
-              <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-blue-500" />
-              <span>{stream.viewers >= 1000 ? (stream.viewers / 1000).toFixed(1) + 'k' : stream.viewers}</span>
-            </div>
+            {stream.status === 'live' && (
+              <div className="flex items-center gap-1 text-zinc-400 bg-zinc-800 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-[9px] sm:text-[10px] font-bold">
+                <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-blue-500" />
+                <span>{stream.viewers >= 1000 ? (stream.viewers / 1000).toFixed(1) + 'k' : stream.viewers}</span>
+              </div>
+            )}
             
             <div className="flex items-center gap-1.5">
               <button 
@@ -343,63 +418,80 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
           </div>
         )}
 
-        {/* Audio Panel */}
+        {/* Audio/Status Panel */}
         <div className={`bg-zinc-950/50 rounded-lg p-2.5 sm:p-3 border transition-colors space-y-2.5 sm:space-y-3 ${isMonitoring ? 'border-blue-500/30' : 'border-zinc-800/50'}`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Mic className={`w-2.5 h-2.5 sm:w-3 sm:h-3 ${isMonitoring ? 'text-blue-500' : 'text-zinc-500'}`} />
-              <span className={`text-[8px] sm:text-[10px] font-bold uppercase ${isMonitoring ? 'text-blue-400' : 'text-zinc-500'}`}>Audio Level</span>
-            </div>
-            <span className={`text-[9px] sm:text-[10px] font-mono ${audioLevel > 80 ? 'text-red-500' : audioLevel > 50 ? 'text-yellow-500' : 'text-emerald-500'}`}>
-              {Math.round(audioLevel)} dB
-            </span>
-          </div>
-          
-          <div className="h-1.5 sm:h-2 w-full bg-zinc-900 rounded-full overflow-hidden flex gap-0.5 p-0.5 border border-zinc-800/80">
-             {Array.from({ length: 24 }).map((_, i) => (
-               <div key={i} className={`h-full flex-1 rounded-[1px] transition-all duration-75 ${i * 4 < audioLevel ? (i > 18 ? 'bg-red-500' : i > 12 ? 'bg-yellow-500' : 'bg-emerald-500') : 'bg-zinc-800'}`} />
-             ))}
-          </div>
+          {stream.status === 'scheduled' ? (
+             <div className="flex flex-col gap-2 py-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase">Release Schedule</span>
+                  <span className="text-[8px] sm:text-[10px] font-mono text-blue-400">T-minus {timeUntilStart}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 w-1/3 animate-pulse" />
+                  </div>
+                  <Calendar className="w-3 h-3 text-zinc-600" />
+                </div>
+             </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Mic className={`w-2.5 h-2.5 sm:w-3 sm:h-3 ${isMonitoring ? 'text-blue-500' : 'text-zinc-500'}`} />
+                  <span className={`text-[8px] sm:text-[10px] font-bold uppercase ${isMonitoring ? 'text-blue-400' : 'text-zinc-500'}`}>Audio Level</span>
+                </div>
+                <span className={`text-[9px] sm:text-[10px] font-mono ${audioLevel > 80 ? 'text-red-500' : audioLevel > 50 ? 'text-yellow-500' : 'text-emerald-500'}`}>
+                  {Math.round(audioLevel)} dB
+                </span>
+              </div>
+              
+              <div className="h-1.5 sm:h-2 w-full bg-zinc-900 rounded-full overflow-hidden flex gap-0.5 p-0.5 border border-zinc-800/80">
+                 {Array.from({ length: 24 }).map((_, i) => (
+                   <div key={i} className={`h-full flex-1 rounded-[1px] transition-all duration-75 ${i * 4 < audioLevel ? (i > 18 ? 'bg-red-500' : i > 12 ? 'bg-yellow-500' : 'bg-emerald-500') : 'bg-zinc-800'}`} />
+                 ))}
+              </div>
 
-          {isMonitoring && (
-            <div className="flex items-center gap-6 pt-1 animate-in fade-in slide-in-from-top-1">
-              <div className="flex items-center gap-2 group/latency">
-                <Timer className={`w-3 h-3 ${getLatencyColor(latency)} transition-colors`} />
-                <div className="flex flex-col">
-                  <span className="text-[6px] sm:text-[7px] font-bold text-zinc-500 uppercase tracking-tighter">Latency</span>
-                  <span className={`text-[9px] sm:text-[10px] font-mono font-bold ${getLatencyColor(latency)} transition-colors`}>{latency}ms</span>
+              {isMonitoring && (
+                <div className="flex items-center gap-6 pt-1 animate-in fade-in slide-in-from-top-1">
+                  <div className="flex items-center gap-2 group/latency">
+                    <Timer className={`w-3 h-3 ${getLatencyColor(latency)} transition-colors`} />
+                    <div className="flex flex-col">
+                      <span className="text-[6px] sm:text-[7px] font-bold text-zinc-500 uppercase tracking-tighter">Latency</span>
+                      <span className={`text-[9px] sm:text-[10px] font-mono font-bold ${getLatencyColor(latency)} transition-colors`}>{latency}ms</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 flex items-center gap-2 group/dropped">
+                    <Activity className={`w-3 h-3 ${droppedFrames > 1.0 ? 'text-red-400' : 'text-emerald-400'} transition-colors`} />
+                    <div className="flex-1 flex flex-col gap-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[6px] sm:text-[7px] font-bold text-zinc-500 uppercase tracking-tighter">Dropped Frames</span>
+                        <span className={`text-[8px] sm:text-[9px] font-mono font-bold ${droppedFrames > 1.0 ? 'text-red-400' : 'text-zinc-300'}`}>{droppedFrames.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full ${getDroppedColor(droppedFrames)} transition-all duration-300`} 
+                          style={{ width: `${Math.min(100, (droppedFrames / 5) * 100)}%` }} 
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2.5 pt-0.5">
+                <button onClick={() => setVolume(v => v === 0 ? 80 : 0)} className="text-zinc-500 hover:text-white transition-colors">
+                  {volume === 0 ? <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+                </button>
+                <div className="flex-1">
+                  <input 
+                    type="range" min="0" max="100" value={volume}
+                    onChange={(e) => setVolume(parseInt(e.target.value))}
+                    className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  />
                 </div>
               </div>
-              <div className="flex-1 flex items-center gap-2 group/dropped">
-                <Activity className={`w-3 h-3 ${droppedFrames > 1.0 ? 'text-red-400' : 'text-emerald-400'} transition-colors`} />
-                <div className="flex-1 flex flex-col gap-1">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[6px] sm:text-[7px] font-bold text-zinc-500 uppercase tracking-tighter">Dropped Frames</span>
-                    <span className={`text-[8px] sm:text-[9px] font-mono font-bold ${droppedFrames > 1.0 ? 'text-red-400' : 'text-zinc-300'}`}>{droppedFrames.toFixed(1)}%</span>
-                  </div>
-                  <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full ${getDroppedColor(droppedFrames)} transition-all duration-300`} 
-                      style={{ width: `${Math.min(100, (droppedFrames / 5) * 100)}%` }} 
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
+            </>
           )}
-
-          <div className="flex items-center gap-2.5 pt-0.5">
-            <button onClick={() => setVolume(v => v === 0 ? 80 : 0)} className="text-zinc-500 hover:text-white transition-colors">
-              {volume === 0 ? <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
-            </button>
-            <div className="flex-1">
-              <input 
-                type="range" min="0" max="100" value={volume}
-                onChange={(e) => setVolume(parseInt(e.target.value))}
-                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-              />
-            </div>
-          </div>
         </div>
 
         {/* Configuration Tabs */}

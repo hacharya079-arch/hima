@@ -4,8 +4,9 @@ export interface StreamSession {
   title: string;
   broadcaster: string;
   viewers: number;
-  status: 'live' | 'offline';
+  status: 'live' | 'offline' | 'scheduled';
   startTime: string;
+  scheduledStart?: string; // ISO string for future streams
   rtmpUrl: string;
   streamKey: string;
   thumbnailUrl: string;
