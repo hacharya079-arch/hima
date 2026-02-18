@@ -36,7 +36,8 @@ import {
   AlertTriangle,
   Calendar,
   Clock,
-  Rocket
+  Rocket,
+  RotateCcw
 } from 'lucide-react';
 import { StreamSession } from '../types';
 
@@ -48,6 +49,7 @@ interface StreamPlayerProps {
   onUpdateQuality?: (bitrate: number, codec: StreamSession['codec']) => void;
   onRegenerateKey?: () => void;
   onGoLive?: () => void;
+  onRestartStream?: () => void;
 }
 
 const StreamPlayer: React.FC<StreamPlayerProps> = ({ 
@@ -57,7 +59,8 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
   onUpdateIpMode,
   onUpdateQuality,
   onRegenerateKey,
-  onGoLive
+  onGoLive,
+  onRestartStream
 }) => {
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -174,6 +177,15 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
     }
   };
 
+  const handleRestartClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsMonitoring(false);
+    setIsPlaying(true);
+    setLatency(24);
+    setDroppedFrames(0.0);
+    onRestartStream?.();
+  };
+
   const handleQualityUpdate = (newBitrate: number, newCodec: StreamSession['codec']) => {
     setBitrate(newBitrate);
     setCodec(newCodec);
@@ -249,12 +261,21 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
               )}
               
               {stream.status === 'scheduled' && onGoLive && (
-                <button 
-                  onClick={(e) => { e.stopPropagation(); onGoLive(); }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-all flex items-center gap-2 shadow-lg shadow-blue-900/40 text-xs font-bold uppercase tracking-wider"
-                >
-                  <Rocket className="w-4 h-4" /> Go Live Now
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onGoLive(); }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-all flex items-center gap-2 shadow-lg shadow-blue-900/40 text-xs font-bold uppercase tracking-wider"
+                  >
+                    <Rocket className="w-4 h-4" /> Go Live Now
+                  </button>
+                  <button 
+                    onClick={handleRestartClick}
+                    className="p-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-all"
+                    title="Reset Internal States"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                </div>
               )}
 
               {stream.status === 'live' && (
@@ -380,7 +401,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
           <div className="bg-zinc-950/80 rounded-lg p-2.5 sm:p-3 border border-blue-500/20 space-y-3 sm:space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="flex items-center justify-between">
                <h4 className="text-[9px] sm:text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                 <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> Quality
+                 <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> Quality & State
                </h4>
                <button onClick={() => setShowAdvanced(false)} className="text-zinc-600 hover:text-zinc-400">
                  <X className="w-3 h-3" />
@@ -398,20 +419,33 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
                   className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="text-[8px] sm:text-[9px] font-bold text-zinc-500 uppercase flex items-center gap-1">
-                  <Cpu className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> Codec
-                </label>
-                <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                  {(['H.264', 'H.265', 'AV1'] as const).map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => handleQualityUpdate(bitrate, c)}
-                      className={`py-1 rounded text-[8px] sm:text-[10px] font-bold border transition-all ${codec === c ? 'bg-blue-600/20 border-blue-600/50 text-blue-400' : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      {c}
-                    </button>
-                  ))}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <label className="text-[8px] sm:text-[9px] font-bold text-zinc-500 uppercase flex items-center gap-1">
+                    <Cpu className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> Codec
+                  </label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(['H.264', 'H.265', 'AV1'] as const).map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => handleQualityUpdate(bitrate, c)}
+                        className={`py-1 rounded text-[7px] sm:text-[8px] font-bold border transition-all ${codec === c ? 'bg-blue-600/20 border-blue-600/50 text-blue-400' : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[8px] sm:text-[9px] font-bold text-zinc-500 uppercase flex items-center gap-1">
+                    <RotateCcw className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> Controls
+                  </label>
+                  <button
+                    onClick={handleRestartClick}
+                    className="w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded text-[8px] sm:text-[9px] font-bold text-zinc-300 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <RefreshCcw className="w-2.5 h-2.5" /> Restart Stream
+                  </button>
                 </div>
               </div>
             </div>

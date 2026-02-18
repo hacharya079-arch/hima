@@ -98,6 +98,9 @@ const App: React.FC = () => {
   });
   const [aiSuggestions, setAiSuggestions] = useState<any>(null);
 
+  const MIN_SCHEDULE_DATE = '2024-01-01';
+  const MAX_SCHEDULE_DATE = '2025-12-31';
+
   const getEffectiveIp = (mode: IPMode) => {
     switch (mode) {
       case 'lan': return detectedLanIp;
@@ -220,6 +223,15 @@ const App: React.FC = () => {
 
   const handleGoLive = (id: string) => {
     setStreams(prev => prev.map(s => s.id === id ? { ...s, status: 'live' } : s));
+  };
+
+  const handleRestartStream = (id: string) => {
+    setStreams(prev => prev.map(s => s.id === id ? { 
+      ...s, 
+      status: s.status === 'scheduled' ? 'scheduled' : 'offline',
+      startTime: new Date().toISOString(),
+      viewers: 0
+    } : s));
   };
 
   const handleUpdateStreamIpMode = (id: string, mode: IPMode) => {
@@ -433,10 +445,14 @@ const App: React.FC = () => {
                             <Calendar className="w-3 h-3 text-blue-500" /> Start Date
                           </label>
                           <input 
-                            type="date" value={newStreamData.scheduledDate}
+                            type="date" 
+                            value={newStreamData.scheduledDate}
+                            min={MIN_SCHEDULE_DATE}
+                            max={MAX_SCHEDULE_DATE}
                             onChange={(e) => setNewStreamData(prev => ({ ...prev, scheduledDate: e.target.value }))}
                             className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
                           />
+                          <p className="text-[8px] text-zinc-500 font-medium px-1">Allowed window: {MIN_SCHEDULE_DATE} to {MAX_SCHEDULE_DATE}</p>
                        </div>
                        <div className="space-y-1.5">
                           <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-2">
@@ -500,6 +516,7 @@ const App: React.FC = () => {
                       onUpdateQuality={(bitrate, codec) => handleUpdateQuality(stream.id, bitrate, codec)}
                       onRegenerateKey={() => handleRegenerateKey(stream.id)}
                       onGoLive={() => handleGoLive(stream.id)}
+                      onRestartStream={() => handleRestartStream(stream.id)}
                     />
                   ))}
                 </div>
