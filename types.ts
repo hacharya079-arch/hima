@@ -4,16 +4,26 @@ export interface StreamSession {
   title: string;
   broadcaster: string;
   viewers: number;
-  status: 'live' | 'offline' | 'scheduled';
+  status: 'live' | 'offline' | 'scheduled' | 'disabled';
   startTime: string;
   scheduledStart?: string; // ISO string for future streams
   rtmpUrl: string;
   streamKey: string;
   thumbnailUrl: string;
-  resolution: '720p' | '1080p' | '2K' | '4K';
+  resolution: string;
   ingestIp: string;
   bitrate?: number; // in Kbps
-  codec?: 'H.264' | 'H.265' | 'AV1';
+  codec?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  aspectRatio?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  preset?: string;
+  profile?: string;
+  pixelFormat?: string;
+  enabledProfiles?: string;
 }
 
 export interface StreamStats {

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, 
@@ -26,65 +25,64 @@ import {
   Sparkles,
   Calendar,
   Clock,
-  ListRestart
+  ListRestart,
+  LogOut,
+  User,
+  Shield,
+  Download,
+  Trash2,
+  PlayCircle,
+  Play,
+  Video,
+  FileText,
+  ServerCrash,
+  FolderOpen,
+  FolderSearch,
+  Save,
+  CheckCircle2,
+  RotateCcw,
+  Check,
+  AlertCircle,
+  Activity
 } from 'lucide-react';
 import DashboardHeader from './components/DashboardHeader';
 import StreamPlayer from './components/StreamPlayer';
 import DeploymentGuide from './components/DeploymentGuide';
+import { StreamTestHub } from './components/StreamTestHub';
 import { StreamSession, StreamStats, ChatMessage } from './types';
-import { analyzeStreamContext, generateStreamThumbnail } from './services/geminiService';
-
-const MOCK_STREAMS: StreamSession[] = [
-  {
-    id: '1',
-    title: 'Late Night Coding Sessions',
-    broadcaster: 'dev_alex',
-    viewers: 1240,
-    status: 'live',
-    startTime: new Date().toISOString(),
-    rtmpUrl: 'rtmp://154.12.88.2/live',
-    streamKey: 'alex_secure_123',
-    thumbnailUrl: 'https://picsum.photos/seed/coding/800/450',
-    resolution: '1080p',
-    ingestIp: '154.12.88.2',
-    bitrate: 6000,
-    codec: 'H.264'
-  },
-  {
-    id: '2',
-    title: 'E-Sports Tournament Qualifiers',
-    broadcaster: 'pro_gaming_tv',
-    viewers: 8520,
-    status: 'live',
-    startTime: new Date().toISOString(),
-    rtmpUrl: 'rtmp://192.168.1.45/live',
-    streamKey: 'tournament_alpha',
-    thumbnailUrl: 'https://picsum.photos/seed/gaming/800/450',
-    resolution: '4K',
-    ingestIp: '192.168.1.45',
-    bitrate: 10000,
-    codec: 'H.265'
-  }
-];
 
 export type IPMode = 'auto' | 'lan' | 'loopback' | 'manual';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'settings' | 'deploy'>('dashboard');
-  const [streams, setStreams] = useState<StreamSession[]>(MOCK_STREAMS);
+  const [token, setToken] = useState<string | null>(localStorage.getItem('streampulse_jwt'));
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'deploy' | 'infra' | 'settings' | 'stream_test'>('dashboard');
+  const [streams, setStreams] = useState<StreamSession[]>([]);
   
   const [detectedPublicIp, setDetectedPublicIp] = useState<string>('Detecting...');
   const [detectedLanIp, setDetectedLanIp] = useState<string>('Detecting...');
   const [manualIp, setManualIp] = useState<string>('');
   const [creationIpMode, setCreationIpMode] = useState<IPMode>('auto');
   const [confirmRemovalId, setConfirmRemovalId] = useState<string | null>(null);
+  const [actionLogs, setActionLogs] = useState<any[]>([]);
 
-  const [stats, setStats] = useState<StreamStats>({
-    cpuUsage: 12.5,
-    memoryUsage: 4.2,
-    activeStreams: 2,
-    totalBandwidth: '124.5 Mbps'
+  const [stats, setStats] = useState<any>({
+    cpuUsage: 8.5,
+    cpuCores: 4,
+    cpuModel: 'Intel Xeon Platinum vCPU',
+    memoryUsage: 2.1,
+    memoryTotal: 16,
+    memoryUsagePct: 13.1,
+    activeStreams: 0,
+    totalBandwidth: '0.0 Mbps',
+    diskUsagePct: 34.2,
+    uptime: 124502,
+    networkTx: '0 KB/s',
+    networkRx: '0 KB/s',
+    dockerContainers: []
   });
+
   const [isGeneratingKey, setIsGeneratingKey] = useState(false);
   const [newStreamData, setNewStreamData] = useState({ 
     title: '', 
@@ -96,10 +94,152 @@ const App: React.FC = () => {
     scheduledDate: '',
     scheduledTime: ''
   });
-  const [aiSuggestions, setAiSuggestions] = useState<any>(null);
 
-  const MIN_SCHEDULE_DATE = '2024-01-01';
-  const MAX_SCHEDULE_DATE = '2025-12-31';
+  // Auth States
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Infrapage config tab states
+  const [selectedFileKey, setSelectedFileKey] = useState<'docker-compose' | 'nginx' | 'nginx-rtmp' | 'transcode' | 'schema'>('docker-compose');
+  // No recording state
+
+  // File content definitions to preview
+  const fileContents = {
+    'docker-compose': `version: '3.8'
+services:
+  streampulse:
+    build:
+      context: ..
+      dockerfile: vps-deployment/Dockerfile
+    container_name: streampulse_manager
+    ports:
+      - "1935:1935" # RTMP ingest port
+      - "80:80"     # HTTP reverse proxy
+      - "443:443"   # HTTPS SSL reverse proxy
+      - "3000:3000" # Direct Node manager interface
+    environment:
+      - NODE_ENV=production
+      - JWT_SECRET=change_this_to_a_secure_random_key_in_production_129841824
+      - DB_HOST=postgres_db
+      - DB_PORT=5432
+      - DB_USER=streampulse_admin
+      - DB_PASSWORD=streampulse_secure_db_pass_19824
+      - DB_NAME=streampulse
+    volumes:
+      - hls_storage:/var/www/hls
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    depends_on:
+      - postgres_db
+    restart: always
+
+  postgres_db:
+    image: postgres:16-alpine
+    container_name: streampulse_db
+    environment:
+      - POSTGRES_DB=streampulse
+      - POSTGRES_USER=streampulse_admin
+      - POSTGRES_PASSWORD=streampulse_secure_db_pass_19824
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: always`,
+    'nginx': `user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    keepalive_timeout 65;
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+
+    server {
+        listen 80;
+        server_name streampulse.yourdomain.com;
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }`,
+    'nginx-rtmp': `rtmp {
+    server {
+        listen 1935; # Standard RTMP port
+        chunk_size 4096;
+
+        # Primary Live Stream application
+        application live {
+            live on;
+            record off;
+
+            # Hand over incoming RTMP stream to FFmpeg for dynamic Multi-Bitrate HLS Transcoding
+            exec_push /usr/local/bin/transcode.sh $name;
+        }
+    }
+}`,
+    'transcode': `#!/bin/bash
+STREAM_KEY=$1
+HLS_PATH="/var/www/hls/\${STREAM_KEY}"
+RTMP_INPUT="rtmp://localhost/live/\${STREAM_KEY}"
+
+mkdir -p "\${HLS_PATH}"
+
+# FFmpeg Multi-Bitrate HLS Transcoder
+ffmpeg -i "\${RTMP_INPUT}" \\
+  -filter_complex "[v:0]split=4[v1080][v720][v480][v360]" \\
+  -map "[v1080]" -c:v:0 libx264 -preset veryfast -b:v:0 6000k -maxrate:v:0 6000k -bufsize:v:0 12000k -g 60 -keyint_min 60 -sc_threshold 0 \\
+  -map "[v720]"  -c:v:1 libx264 -preset veryfast -b:v:1 3500k -maxrate:v:1 3500k -bufsize:v:1 7000k  -g 60 -keyint_min 60 -sc_threshold 0 \\
+  -map "[v480]"  -c:v:2 libx264 -preset veryfast -b:v:2 1500k -maxrate:v:2 1500k -bufsize:v:2 3000k  -g 60 -keyint_min 60 -sc_threshold 0 \\
+  -map "[v360]"  -c:v:3 libx264 -preset veryfast -b:v:3 800k  -maxrate:v:3 800k  -bufsize:v:3 1600k  -g 60 -keyint_min 60 -sc_threshold 0 \\
+  -map a:0 -c:a:0 aac -b:a:0 192k -ac 2 \\
+  -map a:0 -c:a:1 aac -b:a:1 128k -ac 2 \\
+  -map a:0 -c:a:2 aac -b:a:2 96k  -ac 2 \\
+  -map a:0 -c:a:3 aac -b:a:3 64k  -ac 2 \\
+  -f hls -hls_time 4 -hls_playlist_type event -master_pl_name master.m3u8 \\
+  -hls_segment_filename "\${HLS_PATH}/v%v/file%03d.ts" \\
+  -var_stream_map "v:0,a:0 v:1,a:1 v:2,a:2 v:3,a:3" \\
+  "\${HLS_PATH}/v%v/index.m3u8" > /var/log/nginx/transcode_\${STREAM_KEY}.log 2>&1 &`,
+    'schema': `CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(20) DEFAULT 'user',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS streams (
+    id VARCHAR(50) PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    broadcaster VARCHAR(100) NOT NULL,
+    stream_key VARCHAR(100) UNIQUE NOT NULL,
+    status VARCHAR(50) DEFAULT 'offline',
+    scheduled_start TIMESTAMP,
+    rtmp_url VARCHAR(255) NOT NULL,
+    resolution VARCHAR(20) DEFAULT '1080p',
+    bitrate INTEGER DEFAULT 4500,
+    codec VARCHAR(20) DEFAULT 'H.264',
+    ingest_ip VARCHAR(50) NOT NULL,
+    viewers INTEGER DEFAULT 0,
+    start_time TIMESTAMP
+);`
+  };
+
+  const MIN_SCHEDULE_DATE = '2026-01-01';
+  const MAX_SCHEDULE_DATE = '2027-12-31';
 
   const getEffectiveIp = (mode: IPMode) => {
     switch (mode) {
@@ -110,6 +250,69 @@ const App: React.FC = () => {
     }
   };
 
+  // Auth APIs
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthLoading(true);
+
+    const url = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const body = authMode === 'login' ? { username, password } : { username, email, password, role: 'admin' };
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Authentication failed');
+      }
+
+      localStorage.setItem('streampulse_jwt', data.token);
+      setToken(data.token);
+      setCurrentUser(data.user);
+      setUsername('');
+      setPassword('');
+      setEmail('');
+    } catch (err: any) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('streampulse_jwt');
+    setToken(null);
+    setCurrentUser(null);
+  };
+
+  // Load Current User Profile
+  useEffect(() => {
+    if (!token) return;
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch('/api/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.status === 401 || res.status === 403) {
+          handleLogout();
+          return;
+        }
+        const data = await res.json();
+        if (res.ok) {
+          setCurrentUser(data);
+        }
+      } catch (err) {
+        console.error('Failed to load profile:', err);
+      }
+    };
+    fetchProfile();
+  }, [token]);
+
+  // Load IP and Server Stats / Streams / Recordings
   useEffect(() => {
     const detectPublicIp = async () => {
       try {
@@ -142,110 +345,327 @@ const App: React.FC = () => {
     detectLanIp();
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setStats(prev => ({
-        ...prev,
-        cpuUsage: Math.min(100, Math.max(0, prev.cpuUsage + (Math.random() - 0.5) * 2)),
-        memoryUsage: Math.min(16, Math.max(0, prev.memoryUsage + (Math.random() - 0.5) * 0.1)),
-        activeStreams: streams.filter(s => s.status === 'live').length
-      }));
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [streams.length]);
+  // Fetch Streams, Stats, and Recordings from REST API
+  const fetchStreams = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/streams', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) setStreams(data);
+    } catch (err) {
+      console.error('Error fetching streams:', err);
+    }
+  }, [token]);
 
+  const fetchStats = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/system/stats', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) setStats(data);
+    } catch (err) {
+      console.error('Error fetching server stats:', err);
+    }
+  }, [token]);
+
+  const fetchActionLogs = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/system/logs', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) setActionLogs(data);
+    } catch (err) {
+      console.error('Error fetching logs:', err);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    fetchStreams();
+    fetchStats();
+    fetchActionLogs();
+
+    // Poll server statistics, streams, and logs every 3 seconds
+    const interval = setInterval(() => {
+      fetchStreams();
+      fetchStats();
+      fetchActionLogs();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [token, fetchStreams, fetchStats, fetchActionLogs]);
+
+  // Handle Stream Creation via API
   const handleCreateStream = async () => {
-    if (!newStreamData.title || !newStreamData.broadcaster || !newStreamData.streamKey) return;
+    if (!newStreamData.title || !newStreamData.broadcaster) return;
     
     setIsGeneratingKey(true);
-    let finalThumbnail = newStreamData.thumbnailUrl;
-    if (!finalThumbnail) {
-      const aiThumbnail = await generateStreamThumbnail(newStreamData.title, newStreamData.broadcaster);
-      finalThumbnail = aiThumbnail || `https://picsum.photos/seed/${Math.random()}/800/450`;
-    }
-    
-    const ingestIp = getEffectiveIp(creationIpMode);
     const scheduledStart = newStreamData.isScheduled ? `${newStreamData.scheduledDate}T${newStreamData.scheduledTime}:00` : undefined;
-    
-    const newStream: StreamSession = {
-      id: Math.random().toString(36).substr(2, 9),
-      title: newStreamData.title,
-      broadcaster: newStreamData.broadcaster,
-      viewers: 0,
-      status: newStreamData.isScheduled ? 'scheduled' : 'offline',
-      startTime: new Date().toISOString(),
-      scheduledStart: scheduledStart,
-      rtmpUrl: `rtmp://${ingestIp}/live`,
-      streamKey: newStreamData.streamKey,
-      thumbnailUrl: finalThumbnail,
-      resolution: newStreamData.resolution,
-      ingestIp: ingestIp,
-      bitrate: 4500,
-      codec: 'H.264'
-    };
 
-    setStreams([newStream, ...streams]);
-    setNewStreamData({ 
-      title: '', 
-      broadcaster: '', 
-      streamKey: '', 
-      thumbnailUrl: '', 
-      resolution: '1080p',
-      isScheduled: false,
-      scheduledDate: '',
-      scheduledTime: ''
-    });
-    setIsGeneratingKey(false);
+    try {
+      const res = await fetch('/api/streams', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          title: newStreamData.title,
+          broadcaster: newStreamData.broadcaster,
+          resolution: newStreamData.resolution,
+          scheduledStart
+        })
+      });
 
-    const suggestions = await analyzeStreamContext(newStream.title, newStream.broadcaster);
-    setAiSuggestions(suggestions);
-  };
+      if (!res.ok) {
+        throw new Error('Failed to create stream');
+      }
 
-  const handleConfirmRemoval = () => {
-    if (confirmRemovalId) {
-      setStreams(prev => prev.filter(s => s.id !== confirmRemovalId));
-      setConfirmRemovalId(null);
+      const createdStream = await res.json();
+      setStreams(prev => [createdStream, ...prev]);
+
+      // Reset form
+      setNewStreamData({ 
+        title: '', 
+        broadcaster: '', 
+        streamKey: '', 
+        thumbnailUrl: '', 
+        resolution: '1080p',
+        isScheduled: false,
+        scheduledDate: '',
+        scheduledTime: ''
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsGeneratingKey(false);
     }
   };
 
-  const handleUpdateResolution = (id: string, resolution: StreamSession['resolution']) => {
-    setStreams(prev => prev.map(s => s.id === id ? { ...s, resolution } : s));
-  };
-
-  const handleUpdateQuality = (id: string, bitrate: number, codec: StreamSession['codec']) => {
-    setStreams(prev => prev.map(s => s.id === id ? { ...s, bitrate, codec } : s));
-  };
-
-  const handleRegenerateKey = (id: string) => {
-    const newKey = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
-    setStreams(prev => prev.map(s => s.id === id ? { ...s, streamKey: newKey } : s));
-  };
-
-  const handleGoLive = (id: string) => {
-    setStreams(prev => prev.map(s => s.id === id ? { ...s, status: 'live' } : s));
-  };
-
-  const handleRestartStream = (id: string) => {
-    setStreams(prev => prev.map(s => s.id === id ? { 
-      ...s, 
-      status: s.status === 'scheduled' ? 'scheduled' : 'offline',
-      startTime: new Date().toISOString(),
-      viewers: 0
-    } : s));
-  };
-
-  const handleUpdateStreamIpMode = (id: string, mode: IPMode) => {
-    const newIp = getEffectiveIp(mode);
-    setStreams(prev => prev.map(s => {
-      if (s.id === id) {
-        return {
-          ...s,
-          ingestIp: newIp,
-          rtmpUrl: `rtmp://${newIp}/live`
-        };
+  const handleConfirmRemoval = async () => {
+    if (confirmRemovalId) {
+      try {
+        const res = await fetch(`/api/streams/${confirmRemovalId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          setStreams(prev => prev.filter(s => s.id !== confirmRemovalId));
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setConfirmRemovalId(null);
       }
-      return s;
-    }));
+    }
+  };
+
+  const handleUpdateResolution = async (id: string, resolution: string) => {
+    try {
+      const res = await fetch(`/api/streams/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ resolution })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setStreams(prev => prev.map(s => s.id === id ? updated : s));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCloneProfile = async (sourceId: string, config: Partial<StreamSession>) => {
+    try {
+      const otherStreams = streams.filter(s => s.id !== sourceId);
+      for (const other of otherStreams) {
+        await fetch(`/api/streams/${other.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(config)
+        });
+      }
+      setStreams(prev => prev.map(s => s.id !== sourceId ? { ...s, ...config } : s));
+      alert('Resolution configuration cloned successfully to all other panels!');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to clone configuration to all panels.');
+    }
+  };
+
+  const handleUpdateQuality = async (id: string, bitrate: number, codec: string) => {
+    try {
+      const res = await fetch(`/api/streams/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ bitrate, codec })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setStreams(prev => prev.map(s => s.id === id ? updated : s));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleEnableStream = async (id: string) => {
+    try {
+      const res = await fetch(`/api/streams/${id}/enable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setStreams(prev => prev.map(s => s.id === id ? updated : s));
+        fetchActionLogs();
+      } else {
+        const errData = await res.json();
+        alert(errData.error || 'Failed to enable stream');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDisableStream = async (id: string) => {
+    try {
+      const res = await fetch(`/api/streams/${id}/disable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setStreams(prev => prev.map(s => s.id === id ? updated : s));
+        fetchActionLogs();
+      } else {
+        const errData = await res.json();
+        alert(errData.error || 'Failed to disable stream');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Recording control handlers removed
+
+  const handleEditStream = async (id: string, fields: Partial<StreamSession>) => {
+    try {
+      const res = await fetch(`/api/streams/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(fields)
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setStreams(prev => prev.map(s => s.id === id ? updated : s));
+      } else {
+        const errData = await res.json();
+        alert(errData.error || 'Failed to update stream metadata');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRegenerateKey = async (id: string) => {
+    try {
+      const res = await fetch(`/api/streams/${id}/regenerate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setStreams(prev => prev.map(s => s.id === id ? updated : s));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleGoLive = async (id: string) => {
+    try {
+      const res = await fetch(`/api/streams/${id}/toggle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: 'live' })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setStreams(prev => prev.map(s => s.id === id ? updated : s));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRestartStream = async (id: string) => {
+    try {
+      const res = await fetch(`/api/streams/${id}/toggle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: 'offline' })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setStreams(prev => prev.map(s => s.id === id ? updated : s));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Delete recording handler removed
+
+  const copyConfigToClipboard = (txt: string) => {
+    navigator.clipboard.writeText(txt);
+    alert('Configuration code copied to clipboard!');
+  };
+
+  const downloadAllConfigs = () => {
+    // Generate simple text index of files for user download fallback
+    const boundary = "========================================\n";
+    let outputText = "STREAMPULSE DEPLOYMENT CONFIGURATIONS PACK\n\n";
+    Object.entries(fileContents).forEach(([k, v]) => {
+      outputText += `${boundary}FILE: ${k}\n${boundary}${v}\n\n`;
+    });
+    const blob = new Blob([outputText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'streampulse-vps-configs.txt';
+    a.click();
   };
 
   const NavItems = () => (
@@ -255,7 +675,7 @@ const App: React.FC = () => {
         className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
       >
         <LayoutDashboard className="w-5 h-5 shrink-0" />
-        <span className="truncate">Admin Panel</span>
+        <span className="truncate">Admin Dashboard</span>
       </button>
       <button 
         onClick={() => setActiveTab('streams')}
@@ -265,21 +685,110 @@ const App: React.FC = () => {
         <span className="truncate">Public Viewers</span>
       </button>
       <button 
+        onClick={() => setActiveTab('stream_test')}
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'stream_test' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+      >
+        <Activity className="w-5 h-5 shrink-0" />
+        <span className="truncate">Stream Test Hub</span>
+      </button>
+      <button 
         onClick={() => setActiveTab('deploy')}
         className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'deploy' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
       >
         <Terminal className="w-5 h-5 shrink-0" />
-        <span className="truncate">VPS Setup</span>
+        <span className="truncate">VPS Setup Guide</span>
       </button>
       <button 
-        onClick={() => setActiveTab('settings')}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'settings' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+        onClick={() => setActiveTab('infra')}
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'infra' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
       >
         <Settings className="w-5 h-5 shrink-0" />
-        <span className="truncate">Infrastructure</span>
+        <span className="truncate">Docker configs</span>
       </button>
     </>
   );
+
+  // Unauthenticated login overlay
+  if (!token) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-teal-500 to-orange-500"></div>
+          
+          <div className="flex flex-col items-center mb-8">
+            <div className="p-3 bg-blue-600/10 rounded-xl mb-3 border border-blue-500/20">
+              <Shield className="w-8 h-8 text-blue-500" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight">StreamPulse Admin</h1>
+            <p className="text-xs text-zinc-500 uppercase font-mono tracking-widest mt-1">VPS RTMP Control Panel</p>
+          </div>
+
+          <form onSubmit={handleAuth} className="space-y-4">
+            {authError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                {authError}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Username</label>
+              <input 
+                type="text" 
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="admin" 
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
+              />
+            </div>
+
+            {authMode === 'register' && (
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Email Address</label>
+                <input 
+                  type="email" 
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@streampulse.io" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
+                />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Password</label>
+              <input 
+                type="password" 
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••" 
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
+              />
+            </div>
+
+            <button 
+              type="submit"
+              disabled={authLoading}
+              className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 mt-2"
+            >
+              {authLoading ? <RefreshCcw className="w-4 h-4 animate-spin" /> : authMode === 'login' ? 'Sign In' : 'Create Administrator Account'}
+            </button>
+          </form>
+
+          <div className="mt-6 pt-6 border-t border-zinc-800 text-center text-xs text-zinc-500">
+            {authMode === 'login' ? (
+              <p>Don't have an administrator account? <button onClick={() => { setAuthMode('register'); setAuthError(null); }} className="text-blue-400 font-bold hover:underline">Register VPS</button></p>
+            ) : (
+              <p>Already have an administrator account? <button onClick={() => { setAuthMode('login'); setAuthError(null); }} className="text-blue-400 font-bold hover:underline">Sign In</button></p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const liveStreams = streams.filter(s => s.status === 'live');
   const scheduledStreams = streams.filter(s => s.status === 'scheduled');
@@ -291,9 +800,24 @@ const App: React.FC = () => {
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-8 py-6 sm:py-8 flex flex-col lg:flex-row gap-8">
         {/* Sidebar Desktop Nav */}
         <aside className="w-64 shrink-0 hidden lg:flex flex-col gap-2">
+          {currentUser && (
+            <div className="bg-zinc-900 border border-zinc-800/80 rounded-xl p-4 mb-4 flex items-center gap-3">
+              <div className="w-9 h-9 bg-blue-600/15 rounded-full flex items-center justify-center border border-blue-500/20 shrink-0">
+                <User className="w-4 h-4 text-blue-500" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-xs font-bold text-zinc-100 truncate">{currentUser.username}</h4>
+                <p className="text-[10px] text-zinc-500 capitalize">{currentUser.role} Account</p>
+              </div>
+              <button onClick={handleLogout} className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/5 rounded-lg transition-colors">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           <NavItems />
 
-          <div className="mt-8 pt-8 border-t border-zinc-800">
+          <div className="mt-4 pt-4 border-t border-zinc-800">
             <h4 className="px-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4">Detected Addresses</h4>
             <div className="px-4 mb-6 space-y-3">
               <div className="flex flex-col gap-1 text-xs text-zinc-300 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
@@ -316,20 +840,30 @@ const App: React.FC = () => {
             <div className="px-4 space-y-4">
                <div>
                  <div className="flex justify-between text-xs mb-1.5">
-                   <span className="text-zinc-400 flex items-center gap-1"><Cpu className="w-3 h-3"/> CPU</span>
-                   <span className="text-zinc-200">{stats.cpuUsage.toFixed(1)}%</span>
+                   <span className="text-zinc-400 flex items-center gap-1"><Cpu className="w-3 h-3"/> CPU ({stats.cpuCores} Cores)</span>
+                   <span className="text-zinc-200">{stats.cpuUsage?.toFixed(1)}%</span>
                  </div>
                  <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
                     <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${stats.cpuUsage}%` }} />
                  </div>
+                 <span className="text-[9px] text-zinc-600 block mt-1 truncate">{stats.cpuModel}</span>
                </div>
                <div>
                  <div className="flex justify-between text-xs mb-1.5">
                    <span className="text-zinc-400 flex items-center gap-1"><HardDrive className="w-3 h-3"/> RAM</span>
-                   <span className="text-zinc-200">{stats.memoryUsage.toFixed(1)} GB / 16GB</span>
+                   <span className="text-zinc-200">{stats.memoryUsage?.toFixed(1)} GB / {stats.memoryTotal?.toFixed(1)} GB</span>
                  </div>
                  <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${(stats.memoryUsage / 16) * 100}%` }} />
+                    <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${stats.memoryUsagePct}%` }} />
+                 </div>
+               </div>
+               <div>
+                 <div className="flex justify-between text-xs mb-1.5">
+                   <span className="text-zinc-400 flex items-center gap-1"><LayoutDashboard className="w-3 h-3"/> Disk Storage</span>
+                   <span className="text-zinc-200">{stats.diskUsagePct}%</span>
+                 </div>
+                 <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${stats.diskUsagePct}%` }} />
                  </div>
                </div>
             </div>
@@ -364,57 +898,27 @@ const App: React.FC = () => {
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Broadcaster</label>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Broadcaster Handle</label>
                       <input 
-                        type="text" placeholder="Name" value={newStreamData.broadcaster}
+                        type="text" placeholder="e.g. dev_alex" value={newStreamData.broadcaster}
                         onChange={(e) => setNewStreamData(prev => ({ ...prev, broadcaster: e.target.value }))}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Title</label>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Broadcast Title</label>
                       <input 
-                        type="text" placeholder="Stream Title" value={newStreamData.title}
+                        type="text" placeholder="e.g. High Performance Coding" value={newStreamData.title}
                         onChange={(e) => setNewStreamData(prev => ({ ...prev, title: e.target.value }))}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Secret Key</label>
-                      <input 
-                        type="text" placeholder="Password" value={newStreamData.streamKey}
-                        onChange={(e) => setNewStreamData(prev => ({ ...prev, streamKey: e.target.value }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
-                    <div className="space-y-1.5 sm:col-span-2">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center justify-between">
-                        Thumbnail (Optional)
-                        {!newStreamData.thumbnailUrl && (
-                          <span className="flex items-center gap-1 text-[8px] text-blue-400">
-                            <Sparkles className="w-2.5 h-2.5" /> AI Artwork
-                          </span>
-                        )}
-                      </label>
-                      <div className="relative">
-                        <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                        <input 
-                          type="text" placeholder="https://..." value={newStreamData.thumbnailUrl}
-                          onChange={(e) => setNewStreamData(prev => ({ ...prev, thumbnailUrl: e.target.value }))}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Resolution</label>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Resolution Target</label>
                       <select 
                         value={newStreamData.resolution}
                         onChange={(e) => setNewStreamData(prev => ({ ...prev, resolution: e.target.value as StreamSession['resolution'] }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100 focus:ring-2 focus:ring-blue-500/50 outline-none"
                       >
                         <option value="720p">720p HD</option>
                         <option value="1080p">1080p FHD</option>
@@ -422,21 +926,36 @@ const App: React.FC = () => {
                         <option value="4K">4K UHD</option>
                       </select>
                     </div>
+                  </div>
 
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Network</label>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Ingest VPS Network</label>
                       <select 
                         value={creationIpMode}
                         onChange={(e) => setCreationIpMode(e.target.value as IPMode)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100 focus:ring-2 focus:ring-blue-500/50 outline-none"
                       >
-                        <option value="auto">Public (WAN)</option>
-                        <option value="lan">LAN (Local)</option>
-                        <option value="loopback">Host (127.0.0.1)</option>
-                        <option value="manual">Manual</option>
+                        <option value="auto">Public WAN ({detectedPublicIp})</option>
+                        <option value="lan">LAN Local ({detectedLanIp})</option>
+                        <option value="loopback">Host Loopback (127.0.0.1)</option>
+                        <option value="manual">Manual Override</option>
                       </select>
                     </div>
+
+                    {creationIpMode === 'manual' && (
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Manual IPv4 Address</label>
+                        <input 
+                          type="text" placeholder="e.g. 154.12.88.2" value={manualIp}
+                          onChange={(e) => setManualIp(e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100"
+                        />
+                      </div>
+                    )}
                   </div>
+
+                  {/* Recording settings removed */}
 
                   {newStreamData.isScheduled && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 animate-in fade-in slide-in-from-top-2">
@@ -470,7 +989,7 @@ const App: React.FC = () => {
                   <div className="flex justify-end pt-2">
                     <button 
                       onClick={handleCreateStream}
-                      disabled={isGeneratingKey || !newStreamData.title || !newStreamData.broadcaster || !newStreamData.streamKey || (newStreamData.isScheduled && (!newStreamData.scheduledDate || !newStreamData.scheduledTime))}
+                      disabled={isGeneratingKey || !newStreamData.title || !newStreamData.broadcaster || (newStreamData.isScheduled && (!newStreamData.scheduledDate || !newStreamData.scheduledTime))}
                       className="w-full md:w-48 h-[42px] bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2"
                     >
                       {isGeneratingKey ? <><RefreshCcw className="w-4 h-4 animate-spin" /> Processing...</> : 
@@ -482,9 +1001,9 @@ const App: React.FC = () => {
                 <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 bg-zinc-950/50 border border-zinc-800/50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Wifi className="w-3.5 h-3.5 text-zinc-500" />
-                    <span className="text-[11px] text-zinc-400">Ingest point: </span>
+                    <span className="text-[11px] text-zinc-400">Ingest point URL: </span>
                   </div>
-                  <span className="text-[11px] font-mono text-blue-400 font-bold truncate">{getEffectiveIp(creationIpMode)}</span>
+                  <span className="text-[11px] font-mono text-blue-400 font-bold truncate">rtmp://{getEffectiveIp(creationIpMode)}/live</span>
                 </div>
               </section>
 
@@ -492,7 +1011,7 @@ const App: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Tv className="w-5 h-5 text-red-500" />
-                    <h2 className="text-xl font-bold">Manage Broadcasts</h2>
+                    <h2 className="text-xl font-bold">Manage Active Broadcasts</h2>
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 uppercase">
@@ -506,19 +1025,79 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                  {streams.map(stream => (
-                    <StreamPlayer 
-                      key={stream.id} stream={stream} 
-                      onRemove={() => setConfirmRemovalId(stream.id)}
-                      onUpdateResolution={(res) => handleUpdateResolution(stream.id, res as StreamSession['resolution'])}
-                      onUpdateIpMode={(mode) => handleUpdateStreamIpMode(stream.id, mode as IPMode)}
-                      onUpdateQuality={(bitrate, codec) => handleUpdateQuality(stream.id, bitrate, codec)}
-                      onRegenerateKey={() => handleRegenerateKey(stream.id)}
-                      onGoLive={() => handleGoLive(stream.id)}
-                      onRestartStream={() => handleRestartStream(stream.id)}
-                    />
-                  ))}
+                {streams.length === 0 ? (
+                  <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-2xl p-12 text-center text-zinc-500 space-y-4">
+                    <Tv className="w-12 h-12 text-zinc-700 mx-auto" />
+                    <p className="text-sm font-semibold">No broadcasts configured yet. Use the tool above to add your first RTMP ingest point!</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                    {streams.map(stream => (
+                      <StreamPlayer 
+                        key={stream.id} stream={stream} 
+                        onRemove={() => setConfirmRemovalId(stream.id)}
+                        onUpdateResolution={(res) => handleUpdateResolution(stream.id, res)}
+                        onUpdateIpMode={(mode) => handleUpdateResolution(stream.id, stream.resolution)} // Fallback update
+                        onUpdateQuality={(bitrate, codec) => handleUpdateQuality(stream.id, bitrate, codec)}
+                        onRegenerateKey={() => handleRegenerateKey(stream.id)}
+                        onGoLive={() => handleGoLive(stream.id)}
+                        onRestartStream={() => handleRestartStream(stream.id)}
+                        onEnable={() => handleEnableStream(stream.id)}
+                        onDisable={() => handleDisableStream(stream.id)}
+                        onEdit={(updated) => handleEditStream(stream.id, updated)}
+                        onCloneProfile={(config) => handleCloneProfile(stream.id, config)}
+                        isAdmin={currentUser?.role === 'admin'}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Administrator Audit Log */}
+              <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-zinc-400" /> Administrator Audit Logs
+                  </h3>
+                  <button 
+                    onClick={fetchActionLogs}
+                    className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors"
+                    title="Refresh logs"
+                  >
+                    <RefreshCcw className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="bg-zinc-950 rounded-xl border border-zinc-800/80 divide-y divide-zinc-850 max-h-[250px] overflow-y-auto pr-1 text-xs font-mono">
+                  {actionLogs.length === 0 ? (
+                    <div className="p-4 text-center text-zinc-500 font-sans">
+                      No stream state modifications recorded.
+                    </div>
+                  ) : (
+                    actionLogs.map((log) => (
+                      <div key={log.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-zinc-900/40 transition-colors">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+                              log.action === 'enable' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
+                              log.action === 'disable' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                              log.action === 'disabled_reject' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : 'bg-zinc-800 text-zinc-400'
+                            }`}>
+                              {log.action}
+                            </span>
+                            <span className="text-zinc-300 font-bold">"{log.streamTitle}"</span>
+                          </div>
+                          <p className="text-[10px] text-zinc-500 leading-normal font-sans">
+                            {log.details}
+                          </p>
+                        </div>
+                        <div className="text-[10px] text-zinc-500 text-right shrink-0 flex flex-col sm:items-end gap-0.5 font-sans">
+                          <span className="font-mono text-zinc-400">By: <strong className="text-zinc-300">{log.user}</strong></span>
+                          <span>IP: {log.ip}</span>
+                          <span>{new Date(log.timestamp).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </section>
             </>
@@ -528,23 +1107,130 @@ const App: React.FC = () => {
             <div className="space-y-6">
               <div className="flex flex-col gap-2">
                 <h2 className="text-2xl sm:text-3xl font-bold">Public Stream Portal</h2>
-                <p className="text-zinc-400 text-sm">Real-time broadcast monitoring hub.</p>
+                <p className="text-zinc-400 text-sm">Real-time broadcast monitoring hub for multi-player stream execution.</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 {streams.map(stream => (
-                  <StreamPlayer key={stream.id} stream={stream} />
+                  <StreamPlayer 
+                    key={stream.id} 
+                    stream={stream} 
+                    onEdit={(updated) => handleEditStream(stream.id, updated)}
+                    onCloneProfile={(config) => handleCloneProfile(stream.id, config)}
+                    isAdmin={currentUser?.role === 'admin'}
+                  />
                 ))}
               </div>
             </div>
           )}
 
+          {/* Recordings list removed */}
+
           {activeTab === 'deploy' && <DeploymentGuide />}
+
+          {activeTab === 'stream_test' && (
+            <StreamTestHub streams={streams} />
+          )}
+
+          {activeTab === 'infra' && (
+            <div className="space-y-6">
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-8 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-bold">VPS Container Configurations</h2>
+                    <p className="text-zinc-400 text-sm">Inspect and download optimized docker and server config files for Ubuntu deployment.</p>
+                  </div>
+                  <button 
+                    onClick={downloadAllConfigs}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold transition-all"
+                  >
+                    <Download className="w-4 h-4" /> Download Complete Pack
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2 border-b border-zinc-800 pb-4">
+                  <button 
+                    onClick={() => setSelectedFileKey('docker-compose')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedFileKey === 'docker-compose' ? 'bg-blue-600 text-white border-blue-500' : 'bg-zinc-950 border-zinc-800 text-zinc-400'}`}
+                  >
+                    docker-compose.yml
+                  </button>
+                  <button 
+                    onClick={() => setSelectedFileKey('nginx')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedFileKey === 'nginx' ? 'bg-blue-600 text-white border-blue-500' : 'bg-zinc-950 border-zinc-800 text-zinc-400'}`}
+                  >
+                    nginx.conf
+                  </button>
+                  <button 
+                    onClick={() => setSelectedFileKey('nginx-rtmp')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedFileKey === 'nginx-rtmp' ? 'bg-blue-600 text-white border-blue-500' : 'bg-zinc-950 border-zinc-800 text-zinc-400'}`}
+                  >
+                    nginx-rtmp.conf
+                  </button>
+                  <button 
+                    onClick={() => setSelectedFileKey('transcode')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedFileKey === 'transcode' ? 'bg-blue-600 text-white border-blue-500' : 'bg-zinc-950 border-zinc-800 text-zinc-400'}`}
+                  >
+                    transcode.sh (FFmpeg)
+                  </button>
+                  <button 
+                    onClick={() => setSelectedFileKey('schema')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedFileKey === 'schema' ? 'bg-blue-600 text-white border-blue-500' : 'bg-zinc-950 border-zinc-800 text-zinc-400'}`}
+                  >
+                    Postgres Schema
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <pre className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 overflow-x-auto text-[11px] sm:text-xs font-mono text-zinc-300 max-h-[420px] scrollbar-thin">
+                    {fileContents[selectedFileKey]}
+                  </pre>
+                  <button 
+                    onClick={() => copyConfigToClipboard(fileContents[selectedFileKey])}
+                    className="absolute top-3 right-3 px-2.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg text-[10px] font-bold text-zinc-400 transition-colors"
+                  >
+                    Copy Code
+                  </button>
+                </div>
+              </div>
+
+              {/* Server Diagnostics & Docker Health monitor */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-8 space-y-6">
+                <div>
+                  <h3 className="text-lg font-bold">VPS Container Health Logs</h3>
+                  <p className="text-zinc-400 text-sm">Real-time statuses of the primary Docker orchestrations.</p>
+                </div>
+
+                <div className="space-y-3">
+                  {stats.dockerContainers?.length === 0 ? (
+                    <div className="p-4 text-center text-zinc-500 border border-zinc-800 rounded-xl text-xs">
+                      No containers detected. Run `docker compose up` to orchestrate services.
+                    </div>
+                  ) : (
+                    stats.dockerContainers?.map((c: any, idx: number) => (
+                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl">
+                        <div className="flex items-center gap-3">
+                          <span className={`w-2.5 h-2.5 rounded-full ${c.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-zinc-600'}`} />
+                          <div>
+                            <h4 className="text-xs font-bold text-zinc-200 font-mono">{c.name}</h4>
+                            <p className="text-[10px] text-zinc-500">Image: {c.image}</p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono font-semibold px-2 py-0.5 bg-zinc-900 border border-zinc-850 rounded text-zinc-400 truncate">
+                          {c.uptime}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {activeTab === 'settings' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-8 space-y-8">
                <div>
                   <h2 className="text-xl sm:text-2xl font-bold mb-1 sm:mb-2">Global Infrastructure</h2>
-                  <p className="text-zinc-400 text-sm">VPS identification and hardware config.</p>
+                  <p className="text-zinc-400 text-sm">VPS network definitions and defaults.</p>
                </div>
 
                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -554,7 +1240,7 @@ const App: React.FC = () => {
                     </h3>
                     <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-4">
                       <div className="space-y-2">
-                         <label className="text-[10px] font-bold text-zinc-500 uppercase">Public IPv4</label>
+                         <label className="text-[10px] font-bold text-zinc-500 uppercase">Public IPv4 Address</label>
                          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-xs sm:text-sm font-mono text-blue-400 truncate">{detectedPublicIp}</div>
                       </div>
                       <div className="space-y-3">
@@ -562,7 +1248,7 @@ const App: React.FC = () => {
                          <input 
                             type="text" value={manualIp} onChange={(e) => setManualIp(e.target.value)}
                             placeholder="e.g. 154.12.88.2"
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono text-amber-400 outline-none"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono text-amber-400 outline-none focus:ring-2 focus:ring-amber-500/30"
                          />
                       </div>
                     </div>
@@ -584,6 +1270,8 @@ const App: React.FC = () => {
                          ))}
                        </div>
                     </div>
+
+                    {/* Recording settings removed */}
                   </div>
                </div>
             </div>
@@ -601,13 +1289,17 @@ const App: React.FC = () => {
           <Tv className="w-5 h-5" />
           <span className="text-[9px] font-bold uppercase">Streams</span>
         </button>
+        <button onClick={() => setActiveTab('stream_test')} className={`flex flex-col items-center gap-1 flex-1 ${activeTab === 'stream_test' ? 'text-blue-500' : 'text-zinc-500'}`}>
+          <Activity className="w-5 h-5" />
+          <span className="text-[9px] font-bold uppercase">Test</span>
+        </button>
         <button onClick={() => setActiveTab('deploy')} className={`flex flex-col items-center gap-1 flex-1 ${activeTab === 'deploy' ? 'text-blue-500' : 'text-zinc-500'}`}>
           <Terminal className="w-5 h-5" />
           <span className="text-[9px] font-bold uppercase">Setup</span>
         </button>
-        <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-1 flex-1 ${activeTab === 'settings' ? 'text-blue-500' : 'text-zinc-500'}`}>
+        <button onClick={() => setActiveTab('infra')} className={`flex flex-col items-center gap-1 flex-1 ${activeTab === 'infra' ? 'text-blue-500' : 'text-zinc-500'}`}>
           <Settings className="w-5 h-5" />
-          <span className="text-[9px] font-bold uppercase">Infra</span>
+          <span className="text-[9px] font-bold uppercase">Configs</span>
         </button>
       </nav>
 
@@ -634,7 +1326,7 @@ const App: React.FC = () => {
       )}
 
       <footer className="hidden sm:block border-t border-zinc-900 bg-zinc-950/50 py-8 px-8 text-center mt-auto">
-        <p className="text-xs text-zinc-500">© 2024 StreamPulse Media Systems. Professional RTMP Distribution Hub.</p>
+        <p className="text-xs text-zinc-500">© 2026 StreamPulse Media Systems. Professional RTMP Distribution Hub.</p>
       </footer>
     </div>
   );
