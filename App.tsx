@@ -43,12 +43,15 @@ import {
   RotateCcw,
   Check,
   AlertCircle,
-  Activity
+  Activity,
+  Headphones,
+  ChevronDown
 } from 'lucide-react';
 import DashboardHeader from './components/DashboardHeader';
 import StreamPlayer from './components/StreamPlayer';
 import DeploymentGuide from './components/DeploymentGuide';
 import { StreamTestHub } from './components/StreamTestHub';
+import { DeviceManager } from './components/DeviceManager';
 import { StreamSession, StreamStats, ChatMessage } from './types';
 
 export type IPMode = 'auto' | 'lan' | 'loopback' | 'manual';
@@ -57,7 +60,7 @@ const App: React.FC = () => {
   const [token, setToken] = useState<string | null>(localStorage.getItem('streampulse_jwt'));
   const [currentUser, setCurrentUser] = useState<any>(null);
   
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'deploy' | 'infra' | 'settings' | 'stream_test'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'deploy' | 'infra' | 'settings' | 'stream_test' | 'devices'>('dashboard');
   const [streams, setStreams] = useState<StreamSession[]>([]);
   
   const [detectedPublicIp, setDetectedPublicIp] = useState<string>('Detecting...');
@@ -92,8 +95,16 @@ const App: React.FC = () => {
     resolution: '1080p' as StreamSession['resolution'],
     isScheduled: false,
     scheduledDate: '',
-    scheduledTime: ''
+    scheduledTime: '',
+    audioCodec: 'aac',
+    audioBitrate: '128k',
+    audioSampleRate: '44100',
+    audioChannels: 'stereo',
+    audioNormalize: false,
+    audioDelay: 0
   });
+
+  const [isAudioSettingsExpanded, setIsAudioSettingsExpanded] = useState(false);
 
   // Auth States
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -419,7 +430,13 @@ CREATE TABLE IF NOT EXISTS streams (
           title: newStreamData.title,
           broadcaster: newStreamData.broadcaster,
           resolution: newStreamData.resolution,
-          scheduledStart
+          scheduledStart,
+          audioCodec: newStreamData.audioCodec,
+          audioBitrate: newStreamData.audioBitrate,
+          audioSampleRate: Number(newStreamData.audioSampleRate),
+          audioChannels: newStreamData.audioChannels,
+          audioNormalize: newStreamData.audioNormalize,
+          audioDelay: Number(newStreamData.audioDelay)
         })
       });
 
@@ -439,7 +456,13 @@ CREATE TABLE IF NOT EXISTS streams (
         resolution: '1080p',
         isScheduled: false,
         scheduledDate: '',
-        scheduledTime: ''
+        scheduledTime: '',
+        audioCodec: 'aac',
+        audioBitrate: '128k',
+        audioSampleRate: '44100',
+        audioChannels: 'stereo',
+        audioNormalize: false,
+        audioDelay: 0
       });
     } catch (err) {
       console.error(err);
@@ -676,6 +699,13 @@ CREATE TABLE IF NOT EXISTS streams (
       >
         <LayoutDashboard className="w-5 h-5 shrink-0" />
         <span className="truncate">Admin Dashboard</span>
+      </button>
+      <button 
+        onClick={() => setActiveTab('devices')}
+        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'devices' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+      >
+        <Monitor className="w-5 h-5 shrink-0" />
+        <span className="truncate">Device Manager</span>
       </button>
       <button 
         onClick={() => setActiveTab('streams')}
@@ -955,7 +985,123 @@ CREATE TABLE IF NOT EXISTS streams (
                     )}
                   </div>
 
-                  {/* Recording settings removed */}
+                  {/* Dedicated Audio Settings Collapsible Panel */}
+                  <div className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-900/30">
+                    <button 
+                      type="button"
+                      onClick={() => setIsAudioSettingsExpanded(prev => !prev)} 
+                      className="w-full px-4 py-3 flex justify-between items-center text-xs font-bold text-zinc-300 uppercase tracking-wider bg-zinc-900/60 hover:bg-zinc-900/80 transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Headphones className="w-4 h-4 text-emerald-400" /> 
+                        <span>Audio Transcoder Settings</span>
+                      </span>
+                      <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform duration-200 ${isAudioSettingsExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {isAudioSettingsExpanded && (
+                      <div className="p-4 bg-zinc-950/40 border-t border-zinc-800 space-y-4 animate-in slide-in-from-top-1 duration-200">
+                        {/* Audio Codec & Bitrate */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase">Audio Codec</label>
+                            <select 
+                              value={newStreamData.audioCodec}
+                              onChange={(e) => setNewStreamData(prev => ({ ...prev, audioCodec: e.target.value }))}
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100 focus:ring-2 focus:ring-blue-500/50 outline-none"
+                            >
+                              <option value="aac">AAC (Advanced Audio Coding)</option>
+                              <option value="mp3">MP3 (MPEG Layer 3)</option>
+                              <option value="opus">Opus (Low Latency/Speech/Music)</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase">Audio Bitrate</label>
+                            <select 
+                              value={newStreamData.audioBitrate}
+                              onChange={(e) => setNewStreamData(prev => ({ ...prev, audioBitrate: e.target.value }))}
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100 focus:ring-2 focus:ring-blue-500/50 outline-none"
+                            >
+                              <option value="64k">64 kbps (Low Bandwidth)</option>
+                              <option value="96k">96 kbps (Standard Mobile)</option>
+                              <option value="128k">128 kbps (Standard Quality)</option>
+                              <option value="192k">192 kbps (High Quality)</option>
+                              <option value="256k">256 kbps (Studio Quality)</option>
+                              <option value="320k">320 kbps (Audiophile Quality)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Sample Rate & Channel Selection */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase">Sample Rate Configuration</label>
+                            <select 
+                              value={newStreamData.audioSampleRate}
+                              onChange={(e) => setNewStreamData(prev => ({ ...prev, audioSampleRate: e.target.value }))}
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100 focus:ring-2 focus:ring-blue-500/50 outline-none"
+                            >
+                              <option value="32000">32,000 Hz (FM Radio)</option>
+                              <option value="44100">44,100 Hz (CD Audio)</option>
+                              <option value="48000">48,000 Hz (Professional Studio)</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase">Channel Layout</label>
+                            <select 
+                              value={newStreamData.audioChannels}
+                              onChange={(e) => setNewStreamData(prev => ({ ...prev, audioChannels: e.target.value }))}
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer text-zinc-100 focus:ring-2 focus:ring-blue-500/50 outline-none"
+                            >
+                              <option value="mono">Mono (1.0)</option>
+                              <option value="stereo">Stereo (2.0)</option>
+                              <option value="5.1">5.1 Surround Sound</option>
+                              <option value="7.1">7.1 Surround Sound</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Volume Normalization & Delay Controls */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                          <div className="space-y-1.5 flex flex-col justify-center h-full pt-1">
+                            <span className="text-[10px] font-bold text-zinc-500 uppercase mb-2 block">Volume Normalization</span>
+                            <label className="flex items-center gap-3 bg-zinc-950/60 border border-zinc-800 rounded-lg px-4 py-2.5 cursor-pointer select-none text-zinc-300 hover:bg-zinc-950 hover:text-zinc-100 transition-colors">
+                              <input 
+                                type="checkbox"
+                                checked={newStreamData.audioNormalize}
+                                onChange={(e) => setNewStreamData(prev => ({ ...prev, audioNormalize: e.target.checked }))}
+                                className="w-4 h-4 rounded border-zinc-800 text-emerald-500 accent-emerald-500 cursor-pointer"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold uppercase tracking-wider">Loudness Normalization</span>
+                                <span className="text-[9px] text-zinc-500">Apply EBU R128 loudness standard</span>
+                              </div>
+                            </label>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase">Audio Sync Delay (ms)</label>
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="number" 
+                                min="0" 
+                                max="10000" 
+                                step="10"
+                                value={newStreamData.audioDelay}
+                                onChange={(e) => setNewStreamData(prev => ({ ...prev, audioDelay: parseInt(e.target.value, 10) || 0 }))}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100 font-mono"
+                              />
+                              <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wide shrink-0 bg-zinc-900 border border-zinc-800 px-2.5 py-2 rounded-lg">
+                                Milliseconds
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                   {newStreamData.isScheduled && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 animate-in fade-in slide-in-from-top-2">
@@ -1226,6 +1372,10 @@ CREATE TABLE IF NOT EXISTS streams (
             </div>
           )}
 
+          {activeTab === 'devices' && (
+            <DeviceManager token={token} streams={streams} />
+          )}
+
           {activeTab === 'settings' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-8 space-y-8">
                <div>
@@ -1284,6 +1434,10 @@ CREATE TABLE IF NOT EXISTS streams (
         <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 flex-1 ${activeTab === 'dashboard' ? 'text-blue-500' : 'text-zinc-500'}`}>
           <LayoutDashboard className="w-5 h-5" />
           <span className="text-[9px] font-bold uppercase">Admin</span>
+        </button>
+        <button onClick={() => setActiveTab('devices')} className={`flex flex-col items-center gap-1 flex-1 ${activeTab === 'devices' ? 'text-blue-500' : 'text-zinc-500'}`}>
+          <Monitor className="w-5 h-5" />
+          <span className="text-[9px] font-bold uppercase">Devices</span>
         </button>
         <button onClick={() => setActiveTab('streams')} className={`flex flex-col items-center gap-1 flex-1 ${activeTab === 'streams' ? 'text-blue-500' : 'text-zinc-500'}`}>
           <Tv className="w-5 h-5" />

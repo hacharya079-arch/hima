@@ -130,6 +130,365 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
     return ['1080p', '720p', '480p', '360p'];
   });
 
+  // Advanced custom video & audio states
+  const [customGopSize, setCustomGopSize] = useState<number>(stream.gopSize || 60);
+  const [customBufferSize, setCustomBufferSize] = useState<number>(stream.bufferSize || 9000);
+  const [customMaxBitrate, setCustomMaxBitrate] = useState<number>(stream.maxBitrate || 5000);
+  const [customScalingAlgorithm, setCustomScalingAlgorithm] = useState<string>(stream.scalingAlgorithm || 'bicubic');
+
+  const [customAudioEnabled, setCustomAudioEnabled] = useState<boolean>(stream.audioEnabled !== false);
+  const [customAudioSampleRate, setCustomAudioSampleRate] = useState<number>(stream.audioSampleRate || 44100);
+  const [customAudioChannels, setCustomAudioChannels] = useState<string>(stream.audioChannels || 'stereo');
+  const [customAudioVolume, setCustomAudioVolume] = useState<number>(stream.audioVolume !== undefined ? stream.audioVolume : 100);
+  const [customAudioNormalize, setCustomAudioNormalize] = useState<boolean>(!!stream.audioNormalize);
+  const [customAudioNoiseReduction, setCustomAudioNoiseReduction] = useState<boolean>(!!stream.audioNoiseReduction);
+  const [customAudioDelay, setCustomAudioDelay] = useState<number>(stream.audioDelay || 0);
+  const [customAudioLanguage, setCustomAudioLanguage] = useState<string>(stream.audioLanguage || 'eng');
+  const [customAudioTrackSelection, setCustomAudioTrackSelection] = useState<string>(stream.audioTrackSelection || '0');
+  const [customAudioPassthrough, setCustomAudioPassthrough] = useState<boolean>(!!stream.audioPassthrough);
+  const [customAudioTranscoding, setCustomAudioTranscoding] = useState<boolean>(stream.audioTranscoding !== false);
+  const [customProfilesJson, setCustomProfilesJson] = useState<string>(stream.profilesJson || '[]');
+
+  // Resolution Profile definition & states
+  const [profilesList, setProfilesList] = useState<any[]>(() => {
+    try {
+      const parsed = JSON.parse(stream.profilesJson || '[]');
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    } catch (e) {}
+    return [
+      {
+        id: '1',
+        enabled: true,
+        name: '1080p Main',
+        resolutionType: '1080p Full HD',
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        videoCodec: 'H.264',
+        bitrate: 4500,
+        maxBitrate: 5000,
+        bufferSize: 9000,
+        aspectRatio: '16:9',
+        scalingAlgorithm: 'bicubic',
+        keyframeInterval: 60,
+        pixelFormat: 'yuv420p',
+        encoderPreset: 'veryfast',
+        audioEnabled: true,
+        audioCodec: 'aac',
+        audioBitrate: 128,
+        audioSampleRate: 44100,
+        audioChannels: 'stereo',
+        audioVolume: 100,
+        audioNormalize: false
+      },
+      {
+        id: '2',
+        enabled: true,
+        name: '720p Backup',
+        resolutionType: '720p HD',
+        width: 1280,
+        height: 720,
+        fps: 30,
+        videoCodec: 'H.264',
+        bitrate: 2500,
+        maxBitrate: 3000,
+        bufferSize: 5000,
+        aspectRatio: '16:9',
+        scalingAlgorithm: 'bicubic',
+        keyframeInterval: 60,
+        pixelFormat: 'yuv420p',
+        encoderPreset: 'veryfast',
+        audioEnabled: true,
+        audioCodec: 'aac',
+        audioBitrate: 96,
+        audioSampleRate: 44100,
+        audioChannels: 'stereo',
+        audioVolume: 100,
+        audioNormalize: false
+      }
+    ];
+  });
+
+  const [profileSearchQuery, setProfileSearchQuery] = useState('');
+  const [profileSortField, setProfileSortField] = useState<string>('name');
+  const [profileSortOrder, setProfileSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [editingProfile, setEditingProfile] = useState<any | null>(null);
+  const [isProfileManagerExpanded, setIsProfileManagerExpanded] = useState(true);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [isDeletingProfile, setIsDeletingProfile] = useState<string | null>(null);
+  const [profileErrors, setProfileErrors] = useState<string[]>([]);
+
+  useEffect(() => {
+    setCustomProfilesJson(JSON.stringify(profilesList));
+  }, [profilesList]);
+
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(stream.profilesJson || '[]');
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setProfilesList(parsed);
+      }
+    } catch (e) {}
+  }, [stream.profilesJson]);
+
+  // Collapsible panel active states
+  const [activePanels, setActivePanels] = useState<Record<string, boolean>>({
+    video: true,
+    audio: false,
+    profiles: false,
+    advanced: false
+  });
+
+  const togglePanel = (panel: string) => {
+    setActivePanels(prev => ({ ...prev, [panel]: !prev[panel] }));
+  };
+
+  // Preset management state
+  interface StreamPreset {
+    id: string;
+    name: string;
+    resolution: string;
+    width: number;
+    height: number;
+    fps: number;
+    bitrate: number;
+    audioBitrate: number;
+    aspectRatio: string;
+    videoCodec: string;
+    audioCodec: string;
+    preset: string;
+    profile: string;
+    pixelFormat: string;
+    gopSize?: number;
+    bufferSize?: number;
+    maxBitrate?: number;
+    scalingAlgorithm?: string;
+    audioEnabled?: boolean;
+    audioSampleRate?: number;
+    audioChannels?: string;
+    audioVolume?: number;
+    audioNormalize?: boolean;
+    audioNoiseReduction?: boolean;
+    audioDelay?: number;
+    audioLanguage?: string;
+    audioTrackSelection?: string;
+    audioPassthrough?: boolean;
+    audioTranscoding?: boolean;
+    profilesJson?: string;
+  }
+
+  const [presets, setPresets] = useState<StreamPreset[]>(() => {
+    try {
+      const saved = localStorage.getItem('streampulse_presets');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [newPresetName, setNewPresetName] = useState('');
+
+  const handleSavePreset = () => {
+    if (!newPresetName.trim()) {
+      alert('Please enter a name for the preset.');
+      return;
+    }
+    const newPreset: StreamPreset = {
+      id: Math.random().toString(36).substring(2, 9),
+      name: newPresetName,
+      resolution: selectedResolution,
+      width: Number(customWidth),
+      height: Number(customHeight),
+      fps: Number(customFps),
+      bitrate: Number(customBitrate),
+      audioBitrate: Number(customAudioBitrate),
+      aspectRatio: customAspectRatio,
+      videoCodec: customVideoCodec,
+      audioCodec: customAudioCodec,
+      preset: customPreset,
+      profile: customProfile,
+      pixelFormat: customPixelFormat,
+      gopSize: Number(customGopSize),
+      bufferSize: Number(customBufferSize),
+      maxBitrate: Number(customMaxBitrate),
+      scalingAlgorithm: customScalingAlgorithm,
+      audioEnabled: customAudioEnabled,
+      audioSampleRate: Number(customAudioSampleRate),
+      audioChannels: customAudioChannels,
+      audioVolume: Number(customAudioVolume),
+      audioNormalize: customAudioNormalize,
+      audioNoiseReduction: customAudioNoiseReduction,
+      audioDelay: Number(customAudioDelay),
+      audioLanguage: customAudioLanguage,
+      audioTrackSelection: customAudioTrackSelection,
+      audioPassthrough: customAudioPassthrough,
+      audioTranscoding: customAudioTranscoding,
+      profilesJson: customProfilesJson
+    };
+    const updated = [...presets, newPreset];
+    setPresets(updated);
+    localStorage.setItem('streampulse_presets', JSON.stringify(updated));
+    setNewPresetName('');
+    alert(`Preset "${newPreset.name}" saved successfully!`);
+  };
+
+  const handleLoadPreset = (preset: StreamPreset) => {
+    setSelectedResolution(preset.resolution);
+    setCustomWidth(preset.width);
+    setCustomHeight(preset.height);
+    setCustomFps(preset.fps);
+    setCustomBitrate(preset.bitrate);
+    setCustomAudioBitrate(preset.audioBitrate || 128);
+    setCustomAspectRatio(preset.aspectRatio);
+    setCustomVideoCodec(preset.videoCodec);
+    setCustomAudioCodec(preset.audioCodec);
+    setCustomPreset(preset.preset);
+    setCustomProfile(preset.profile);
+    setCustomPixelFormat(preset.pixelFormat);
+    if (preset.gopSize !== undefined) setCustomGopSize(preset.gopSize);
+    if (preset.bufferSize !== undefined) setCustomBufferSize(preset.bufferSize);
+    if (preset.maxBitrate !== undefined) setCustomMaxBitrate(preset.maxBitrate);
+    if (preset.scalingAlgorithm !== undefined) setCustomScalingAlgorithm(preset.scalingAlgorithm);
+    if (preset.audioEnabled !== undefined) setCustomAudioEnabled(preset.audioEnabled);
+    if (preset.audioSampleRate !== undefined) setCustomAudioSampleRate(preset.audioSampleRate);
+    if (preset.audioChannels !== undefined) setCustomAudioChannels(preset.audioChannels);
+    if (preset.audioVolume !== undefined) setCustomAudioVolume(preset.audioVolume);
+    if (preset.audioNormalize !== undefined) setCustomAudioNormalize(preset.audioNormalize);
+    if (preset.audioNoiseReduction !== undefined) setCustomAudioNoiseReduction(preset.audioNoiseReduction);
+    if (preset.audioDelay !== undefined) setCustomAudioDelay(preset.audioDelay);
+    if (preset.audioLanguage !== undefined) setCustomAudioLanguage(preset.audioLanguage);
+    if (preset.audioTrackSelection !== undefined) setCustomAudioTrackSelection(preset.audioTrackSelection);
+    if (preset.audioPassthrough !== undefined) setCustomAudioPassthrough(preset.audioPassthrough);
+    if (preset.audioTranscoding !== undefined) setCustomAudioTranscoding(preset.audioTranscoding);
+    if (preset.profilesJson !== undefined) setCustomProfilesJson(preset.profilesJson);
+    alert(`Preset "${preset.name}" loaded successfully!`);
+  };
+
+  const handleDeletePreset = (id: string, name: string) => {
+    const updated = presets.filter(p => p.id !== id);
+    setPresets(updated);
+    localStorage.setItem('streampulse_presets', JSON.stringify(updated));
+    alert(`Preset "${name}" deleted.`);
+  };
+
+  // Validation state
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  
+  useEffect(() => {
+    const errors: string[] = [];
+    if (selectedResolution === 'Custom Resolution') {
+      if (customWidth < 128 || customWidth > 7680) {
+        errors.push('Width must be between 128 and 7680 (8K).');
+      }
+      if (customHeight < 128 || customHeight > 4320) {
+        errors.push('Height must be between 128 and 4320 (8K).');
+      }
+      if (customFps < 1 || customFps > 240) {
+        errors.push('FPS must be between 1 and 240.');
+      }
+      if (customBitrate < 50 || customBitrate > 100000) {
+        errors.push('Video Bitrate must be between 50k and 100,000k.');
+      }
+    }
+    if (customGopSize < 1 || customGopSize > 1000) {
+      errors.push('GOP must be between 1 and 1000 frames.');
+    }
+    if (customBufferSize < 10 || customBufferSize > 500000) {
+      errors.push('Buffer Size must be between 10k and 500,000k.');
+    }
+    if (customMaxBitrate < 50 || customMaxBitrate > 100000) {
+      errors.push('Max Bitrate must be between 50k and 100,000k.');
+    }
+    if (customAudioEnabled) {
+      if (customAudioVolume < 0 || customAudioVolume > 200) {
+        errors.push('Audio Volume must be between 0% and 200%.');
+      }
+      if (customAudioDelay < 0 || customAudioDelay > 10000) {
+        errors.push('Audio Delay must be between 0ms and 10000ms.');
+      }
+    }
+    if (customVideoCodec === 'AV1' && customProfile === 'baseline') {
+      errors.push('AV1 does not support baseline profile. Choose high or main.');
+    }
+    setValidationErrors(errors);
+  }, [
+    selectedResolution, customWidth, customHeight, customFps, customBitrate,
+    customGopSize, customBufferSize, customMaxBitrate, customAudioEnabled,
+    customAudioVolume, customAudioDelay, customVideoCodec, customProfile
+  ]);
+
+  // Live Server FFmpeg Command Preview
+  const [previewCommand, setPreviewCommand] = useState<string>('');
+  
+  useEffect(() => {
+    const fetchPreview = async () => {
+      try {
+        const token = localStorage.getItem('token') || localStorage.getItem('streampulse_jwt') || '';
+        const res = await fetch('/api/streams/preview-command', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            resolution: selectedResolution,
+            profilesJson: customProfilesJson,
+            customData: {
+              width: customWidth,
+              height: customHeight,
+              fps: customFps,
+              bitrate: customBitrate,
+              aspectRatio: customAspectRatio,
+              videoCodec: customVideoCodec,
+              audioCodec: customAudioCodec,
+              preset: customPreset,
+              profile: customProfile,
+              pixelFormat: customPixelFormat,
+              gopSize: customGopSize,
+              bufferSize: customBufferSize,
+              maxBitrate: customMaxBitrate,
+              scalingAlgorithm: customScalingAlgorithm,
+              audioEnabled: customAudioEnabled,
+              audioBitrate: `${customAudioBitrate}k`,
+              audioSampleRate: customAudioSampleRate,
+              audioChannels: customAudioChannels,
+              audioVolume: customAudioVolume,
+              audioNormalize: customAudioNormalize,
+              audioNoiseReduction: customAudioNoiseReduction,
+              audioDelay: customAudioDelay,
+              audioLanguage: customAudioLanguage,
+              audioTrackSelection: customAudioTrackSelection,
+              audioPassthrough: customAudioPassthrough,
+              audioTranscoding: customAudioTranscoding
+            }
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setPreviewCommand(data.command);
+        }
+      } catch (err) {
+        console.error('Error fetching command preview:', err);
+      }
+    };
+    
+    const delayDebounce = setTimeout(() => {
+      fetchPreview();
+    }, 400);
+    return () => clearTimeout(delayDebounce);
+  }, [
+    selectedResolution, customWidth, customHeight, customFps, customBitrate,
+    customAspectRatio, customVideoCodec, customAudioCodec, customPreset,
+    customProfile, customPixelFormat, customGopSize, customBufferSize,
+    customMaxBitrate, customScalingAlgorithm, customAudioEnabled, customAudioBitrate,
+    customAudioSampleRate, customAudioChannels, customAudioVolume, customAudioNormalize,
+    customAudioNoiseReduction, customAudioDelay, customAudioLanguage,
+    customAudioTrackSelection, customAudioPassthrough, customAudioTranscoding,
+    customProfilesJson
+  ]);
+
   useEffect(() => {
     setSelectedResolution(stream.resolution || '1080p');
     setCustomWidth(stream.width || 1920);
@@ -147,9 +506,217 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
     } else {
       setCustomEnabledProfiles(['1080p', '720p', '480p', '360p']);
     }
-  }, [stream.id]);
+
+    setCustomGopSize(stream.gopSize || 60);
+    setCustomBufferSize(stream.bufferSize || 9000);
+    setCustomMaxBitrate(stream.maxBitrate || 5000);
+    setCustomScalingAlgorithm(stream.scalingAlgorithm || 'bicubic');
+
+    setCustomAudioEnabled(stream.audioEnabled !== false);
+    const aBit = stream.audioBitrate ? parseInt(stream.audioBitrate) : 128;
+    setCustomAudioBitrate(isNaN(aBit) ? 128 : aBit);
+    setCustomAudioSampleRate(stream.audioSampleRate || 44100);
+    setCustomAudioChannels(stream.audioChannels || 'stereo');
+    setCustomAudioVolume(stream.audioVolume !== undefined ? stream.audioVolume : 100);
+    setCustomAudioNormalize(!!stream.audioNormalize);
+    setCustomAudioNoiseReduction(!!stream.audioNoiseReduction);
+    setCustomAudioDelay(stream.audioDelay || 0);
+    setCustomAudioLanguage(stream.audioLanguage || 'eng');
+    setCustomAudioTrackSelection(stream.audioTrackSelection || '0');
+    setCustomAudioPassthrough(!!stream.audioPassthrough);
+    setCustomAudioTranscoding(stream.audioTranscoding !== false);
+    setCustomProfilesJson(stream.profilesJson || '[]');
+  }, [stream.id, stream.resolution, stream.width, stream.height, stream.fps, stream.bitrate, stream.gopSize, stream.bufferSize, stream.maxBitrate, stream.scalingAlgorithm, stream.audioEnabled, stream.audioBitrate, stream.audioSampleRate, stream.audioChannels, stream.audioVolume, stream.audioNormalize, stream.audioNoiseReduction, stream.audioDelay, stream.audioLanguage, stream.audioTrackSelection, stream.audioPassthrough, stream.audioTranscoding, stream.profilesJson]);
+
+  const getEstimatedCpuUsage = (p: any): number => {
+    if (Number(p.width) === 0) return 1; // Audio only uses almost 0% CPU
+    const pixels = (Number(p.width) || 1280) * (Number(p.height) || 720);
+    const fps = Number(p.fps) || 30;
+    const codec = p.videoCodec || 'H.264';
+    const preset = p.encoderPreset || 'veryfast';
+
+    // Base usage for standard 1280x720 @ 30fps is around 5% CPU on medium preset
+    const pixelFactor = pixels / (1280 * 720);
+    const fpsFactor = fps / 30;
+
+    let codecFactor = 1.0;
+    if (codec === 'H.265' || codec === 'HEVC') {
+      codecFactor = 1.8;
+    } else if (codec === 'AV1') {
+      codecFactor = 3.5;
+    }
+
+    let presetFactor = 0.7; // default for veryfast
+    switch (preset) {
+      case 'ultrafast': presetFactor = 0.3; break;
+      case 'superfast': presetFactor = 0.5; break;
+      case 'veryfast': presetFactor = 0.7; break;
+      case 'faster': presetFactor = 0.85; break;
+      case 'fast': presetFactor = 1.0; break;
+      case 'medium': presetFactor = 1.3; break;
+      case 'slow': presetFactor = 1.8; break;
+      case 'slower': presetFactor = 2.5; break;
+      case 'veryslow': presetFactor = 4.0; break;
+    }
+
+    const estimated = Math.round(5 * pixelFactor * fpsFactor * codecFactor * presetFactor);
+    return Math.max(1, estimated);
+  };
+
+  const getEstimatedBitrate = (p: any): number => {
+    const videoBit = Number(p.width) === 0 ? 0 : (Number(p.bitrate) || 2500);
+    const audioBit = p.audioEnabled !== false ? (Number(p.audioBitrate) || 128) : 0;
+    return videoBit + audioBit;
+  };
+
+  const validateProfile = (p: any, list: any[]): string[] => {
+    const errors: string[] = [];
+    if (!p.name || !p.name.trim()) {
+      errors.push("Profile name cannot be empty.");
+    }
+    const isDuplicateName = list.some(item => item.id !== p.id && item.name.toLowerCase() === p.name.toLowerCase());
+    if (isDuplicateName) {
+      errors.push(`Profile name "${p.name}" is already in use.`);
+    }
+    if (isNaN(Number(p.width)) || Number(p.width) <= 0) {
+      errors.push("Width must be a positive number.");
+    }
+    if (isNaN(Number(p.height)) || Number(p.height) <= 0) {
+      errors.push("Height must be a positive number.");
+    }
+    if (isNaN(Number(p.fps)) || Number(p.fps) <= 0 || Number(p.fps) > 240) {
+      errors.push("FPS must be between 1 and 240.");
+    }
+    if (isNaN(Number(p.bitrate)) || Number(p.bitrate) <= 0) {
+      errors.push("Video bitrate must be positive.");
+    }
+    return errors;
+  };
+
+  const handleAddProfile = () => {
+    const newId = String(Date.now());
+    const nextNum = profilesList.length + 1;
+    const newProfile = {
+      id: newId,
+      enabled: true,
+      name: `Profile ${nextNum}`,
+      resolutionType: '1080p Full HD',
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      videoCodec: 'H.264',
+      bitrate: 4500,
+      maxBitrate: 5000,
+      bufferSize: 9000,
+      aspectRatio: '16:9',
+      scalingAlgorithm: 'bicubic',
+      keyframeInterval: 60,
+      pixelFormat: 'yuv420p',
+      encoderPreset: 'veryfast',
+      audioEnabled: true,
+      audioCodec: 'aac',
+      audioBitrate: 128,
+      audioSampleRate: 44100,
+      audioChannels: 'stereo',
+      audioVolume: 100,
+      audioNormalize: false
+    };
+    setProfilesList(prev => [...prev, newProfile]);
+  };
+
+  const handleDuplicateProfile = (p: any) => {
+    const newId = String(Date.now() + Math.random());
+    const duplicated = {
+      ...p,
+      id: newId,
+      name: `${p.name} (Copy)`
+    };
+    setProfilesList(prev => {
+      const idx = prev.findIndex(item => item.id === p.id);
+      if (idx !== -1) {
+        const next = [...prev];
+        next.splice(idx + 1, 0, duplicated);
+        return next;
+      }
+      return [...prev, duplicated];
+    });
+  };
+
+  const handleDeleteProfile = async (id: string, name: string) => {
+    const isLastProfile = profilesList.length === 1;
+    const confirmMessage = isLastProfile
+      ? "This is the last Output Profile. Are you sure you want to delete it?"
+      : `Are you sure you want to delete profile "${name}"?`;
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    setIsDeletingProfile(id);
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('streampulse_jwt') || '';
+      const res = await fetch(`/api/streams/${stream.id}/profiles/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        // Immediately update local state without requiring a page reload
+        setProfilesList(data.profiles || []);
+        
+        // Notify parent about the updated profilesJson so UI stays fully in sync without reload
+        if (onEdit) {
+          onEdit({ profilesJson: JSON.stringify(data.profiles || []) });
+        }
+        
+        alert('Profile deleted successfully.');
+      } else {
+        const errData = await res.json();
+        alert(errData.error || 'Failed to delete profile.');
+      }
+    } catch (err) {
+      console.error('Error deleting profile:', err);
+      alert('Failed to delete profile. Please try again.');
+    } finally {
+      setIsDeletingProfile(null);
+    }
+  };
+
+  const handleToggleProfile = (id: string) => {
+    setProfilesList(prev => prev.map(p => p.id === id ? { ...p, enabled: !p.enabled } : p));
+  };
+
+  const handleMoveProfile = (id: string, direction: 'up' | 'down') => {
+    const index = profilesList.findIndex(p => p.id === id);
+    if (index === -1) return;
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === profilesList.length - 1) return;
+
+    const nextIndex = direction === 'up' ? index - 1 : index + 1;
+    const newList = [...profilesList];
+    const temp = newList[index];
+    newList[index] = newList[nextIndex];
+    newList[nextIndex] = temp;
+    setProfilesList(newList);
+  };
 
   const handleSaveResolutionConfig = () => {
+    const allErrors: string[] = [];
+    profilesList.forEach(p => {
+      const pErrors = validateProfile(p, profilesList);
+      if (pErrors.length > 0) {
+        allErrors.push(`[${p.name}]: ${pErrors.join(', ')}`);
+      }
+    });
+
+    if (allErrors.length > 0) {
+      alert(`Please fix profile validation errors first:\n- ${allErrors.join('\n- ')}`);
+      return;
+    }
     if (onEdit) {
       onEdit({
         resolution: selectedResolution,
@@ -164,6 +731,23 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
         profile: customProfile,
         pixelFormat: customPixelFormat,
         enabledProfiles: customEnabledProfiles.join(','),
+        gopSize: Number(customGopSize),
+        bufferSize: Number(customBufferSize),
+        maxBitrate: Number(customMaxBitrate),
+        scalingAlgorithm: customScalingAlgorithm,
+        audioEnabled: customAudioEnabled,
+        audioBitrate: `${customAudioBitrate}k`,
+        audioSampleRate: Number(customAudioSampleRate),
+        audioChannels: customAudioChannels,
+        audioVolume: Number(customAudioVolume),
+        audioNormalize: customAudioNormalize,
+        audioNoiseReduction: customAudioNoiseReduction,
+        audioDelay: Number(customAudioDelay),
+        audioLanguage: customAudioLanguage,
+        audioTrackSelection: customAudioTrackSelection,
+        audioPassthrough: customAudioPassthrough,
+        audioTranscoding: customAudioTranscoding,
+        profilesJson: customProfilesJson
       });
     }
   };
@@ -182,6 +766,22 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
     setCustomProfile('main');
     setCustomPixelFormat('yuv420p');
     setCustomEnabledProfiles(['1080p', '720p', '480p', '360p']);
+    setCustomGopSize(60);
+    setCustomBufferSize(9000);
+    setCustomMaxBitrate(5000);
+    setCustomScalingAlgorithm('bicubic');
+    setCustomAudioEnabled(true);
+    setCustomAudioSampleRate(44100);
+    setCustomAudioChannels('stereo');
+    setCustomAudioVolume(100);
+    setCustomAudioNormalize(false);
+    setCustomAudioNoiseReduction(false);
+    setCustomAudioDelay(0);
+    setCustomAudioLanguage('eng');
+    setCustomAudioTrackSelection('0');
+    setCustomAudioPassthrough(false);
+    setCustomAudioTranscoding(true);
+    setCustomProfilesJson('[]');
   };
 
   const handleCopyResolutionConfig = () => {
@@ -564,7 +1164,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
     }
   }, [stream.status, stream.scheduledStart]);
 
-  const copyToClipboard = (text: string, type: 'url' | 'key' | 'rtmp' | 'hls' | 'dash') => {
+  const copyToClipboard = (text: string, type: 'url' | 'key' | 'rtmp' | 'hls' | 'dash' | 'embed' | 'vlc' | 'videojs') => {
     navigator.clipboard.writeText(text);
     if (type === 'url') {
       setCopiedUrl(true);
@@ -1472,212 +2072,691 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
                 <div className="bg-zinc-950/80 rounded-xl p-3 border border-zinc-800/80 space-y-3">
                   <div className="flex items-center justify-between">
                     <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Monitor className="w-3.5 h-3.5" /> Resolution Target Settings
+                      <Monitor className="w-3.5 h-3.5" /> Stream Encoder Dashboard
                     </h4>
-                    <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono font-bold uppercase">Independent</span>
+                    <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono font-bold uppercase">Pro Transcoder</span>
                   </div>
 
-                  {/* Primary Selection */}
-                  <div className="grid grid-cols-1 gap-2">
-                    <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wide">Output Format Target</label>
-                    <select
-                      value={selectedResolution}
-                      onChange={(e) => {
-                        setSelectedResolution(e.target.value);
-                        onUpdateResolution?.(e.target.value);
-                      }}
-                      className="bg-zinc-900 border border-zinc-800 text-zinc-100 text-[11px] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500 transition-colors cursor-pointer w-full"
+                  {/* Resolution Profile Manager (Collapsible) */}
+                  <div className="bg-zinc-950/80 rounded-xl p-3 border border-zinc-800/80 space-y-3">
+                    <div 
+                      onClick={() => setIsProfileManagerExpanded(!isProfileManagerExpanded)}
+                      className="flex items-center justify-between cursor-pointer select-none"
                     >
-                      <option value="Source (Original)">Source (Original)</option>
-                      <option value="4K (3840×2160)">4K (3840×2160)</option>
-                      <option value="2K (2560×1440)">2K (2560×1440)</option>
-                      <option value="1080p (1920×1080)">1080p (1920×1080)</option>
-                      <option value="900p (1600×900)">900p (1600×900)</option>
-                      <option value="720p (1280×720)">720p (1280×720)</option>
-                      <option value="576p (1024×576)">576p (1024×576)</option>
-                      <option value="480p (854×480)">480p (854×480)</option>
-                      <option value="360p (640×360)">360p (640×360)</option>
-                      <option value="240p (426×240)">240p (426×240)</option>
-                      <option value="Audio Only">Audio Only</option>
-                      <option value="Custom Resolution">Custom Resolution</option>
-                    </select>
-                  </div>
-
-                  {/* Custom Parameters Block */}
-                  {selectedResolution === 'Custom Resolution' && (
-                    <div className="p-3 bg-zinc-900/50 rounded-lg border border-zinc-800/50 space-y-3.5 animate-in fade-in slide-in-from-top-1 duration-200">
-                      <p className="text-[8px] text-blue-400/80 font-bold uppercase tracking-widest">Custom Transcoder Flags</p>
-                      
-                      {/* Grid for Width, Height, FPS */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Width</label>
-                          <input
-                            type="number"
-                            value={customWidth}
-                            onChange={(e) => setCustomWidth(Number(e.target.value))}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Height</label>
-                          <input
-                            type="number"
-                            value={customHeight}
-                            onChange={(e) => setCustomHeight(Number(e.target.value))}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">FPS</label>
-                          <input
-                            type="number"
-                            value={customFps}
-                            onChange={(e) => setCustomFps(Number(e.target.value))}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Grid for Bitrates */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Video Bitrate (kbps)</label>
-                          <input
-                            type="number"
-                            value={customBitrate}
-                            onChange={(e) => setCustomBitrate(Number(e.target.value))}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Audio Bitrate (kbps)</label>
-                          <input
-                            type="number"
-                            value={customAudioBitrate}
-                            onChange={(e) => setCustomAudioBitrate(Number(e.target.value))}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Video, Audio, Aspect ratio */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Aspect Ratio</label>
-                          <select
-                            value={customAspectRatio}
-                            onChange={(e) => setCustomAspectRatio(e.target.value)}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1 py-1 text-[9px] focus:outline-none focus:border-blue-500 text-zinc-300"
-                          >
-                            <option value="16:9">16:9</option>
-                            <option value="4:3">4:3</option>
-                            <option value="21:9">21:9</option>
-                            <option value="1:1">1:1</option>
-                            <option value="custom">custom</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Video Codec</label>
-                          <select
-                            value={customVideoCodec}
-                            onChange={(e) => setCustomVideoCodec(e.target.value)}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1 py-1 text-[9px] focus:outline-none focus:border-blue-500 text-zinc-300"
-                          >
-                            <option value="H.264">H.264</option>
-                            <option value="H.265">H.265</option>
-                            <option value="AV1">AV1</option>
-                            <option value="none">none</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Audio Codec</label>
-                          <select
-                            value={customAudioCodec}
-                            onChange={(e) => setCustomAudioCodec(e.target.value)}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1 py-1 text-[9px] focus:outline-none focus:border-blue-500 text-zinc-300"
-                          >
-                            <option value="aac">aac</option>
-                            <option value="opus">opus</option>
-                            <option value="none">none</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* Preset, Profile, Pixel Format */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">FFmpeg Preset</label>
-                          <select
-                            value={customPreset}
-                            onChange={(e) => setCustomPreset(e.target.value)}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1 py-1 text-[9px] focus:outline-none focus:border-blue-500 text-zinc-300"
-                          >
-                            <option value="ultrafast">ultrafast</option>
-                            <option value="superfast">superfast</option>
-                            <option value="veryfast">veryfast</option>
-                            <option value="faster">faster</option>
-                            <option value="fast">fast</option>
-                            <option value="medium">medium</option>
-                            <option value="slow">slow</option>
-                            <option value="slower">slower</option>
-                            <option value="placebo">placebo</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Profile</label>
-                          <select
-                            value={customProfile}
-                            onChange={(e) => setCustomProfile(e.target.value)}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1 py-1 text-[9px] focus:outline-none focus:border-blue-500 text-zinc-300"
-                          >
-                            <option value="baseline">baseline</option>
-                            <option value="main">main</option>
-                            <option value="high">high</option>
-                            <option value="main10">main10</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Pixel Format</label>
-                          <select
-                            value={customPixelFormat}
-                            onChange={(e) => setCustomPixelFormat(e.target.value)}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-1 py-1 text-[9px] focus:outline-none focus:border-blue-500 text-zinc-300"
-                          >
-                            <option value="yuv420p">yuv420p</option>
-                            <option value="yuv422p">yuv422p</option>
-                            <option value="yuv444p">yuv444p</option>
-                            <option value="yuv420p10le">yuv420p10le</option>
-                          </select>
-                        </div>
+                      <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Monitor className="w-3.5 h-3.5" /> Resolution Profile Manager
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono font-bold uppercase">Pro Transcoder</span>
+                        <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 ${isProfileManagerExpanded ? 'rotate-180' : ''}`} />
                       </div>
                     </div>
-                  )}
 
-                  {/* Multi-Bitrate Profiles Checkboxes */}
-                  <div className="space-y-1 bg-zinc-900/30 p-2 rounded-lg border border-zinc-800/40">
-                    <label className="text-[8px] text-zinc-400 font-bold uppercase tracking-wider block">Enabled Adaptive Playback Profiles</label>
-                    <div className="flex flex-wrap gap-3 pt-1">
-                      {['1080p', '720p', '480p', '360p'].map((profileOption) => {
-                        const isChecked = customEnabledProfiles.includes(profileOption);
-                        return (
-                          <label key={profileOption} className="flex items-center gap-1.5 text-[10px] text-zinc-300 cursor-pointer select-none">
+                    {isProfileManagerExpanded && (
+                      <div className="space-y-3 animate-in slide-in-from-top-1 duration-200">
+                        {/* Search & Actions Bar */}
+                        <div className="flex gap-2 items-center">
+                          <div className="relative flex-1">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-2 text-zinc-500">
+                              <span className="text-[10px] font-bold">🔍</span>
+                            </span>
                             <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setCustomEnabledProfiles(prev => prev.filter(p => p !== profileOption));
-                                } else {
-                                  setCustomEnabledProfiles(prev => [...prev, profileOption]);
-                                }
-                              }}
-                              className="accent-blue-500 rounded"
+                              type="text"
+                              placeholder="Search profiles..."
+                              value={profileSearchQuery}
+                              onChange={(e) => setProfileSearchQuery(e.target.value)}
+                              className="bg-zinc-900 border border-zinc-800 text-[10px] rounded px-2 py-1 pl-7 text-zinc-100 w-full focus:outline-none focus:border-blue-500"
                             />
-                            {profileOption}
-                          </label>
-                        );
-                      })}
+                          </div>
+                          <button
+                            onClick={handleAddProfile}
+                            className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-[8px] px-2 py-1.5 rounded uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1"
+                          >
+                            <span>➕ Add Output Profile</span>
+                          </button>
+                        </div>
+
+                        {/* Profile Table */}
+                        <div className="overflow-x-auto rounded-lg border border-zinc-800/60 bg-zinc-900/10">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="bg-zinc-900/60 text-[8px] text-zinc-400 uppercase font-black border-b border-zinc-800/80">
+                                <th 
+                                  onClick={() => {
+                                    setProfileSortField('enabled');
+                                    setProfileSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                                  }}
+                                  className="p-2 cursor-pointer hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  State
+                                </th>
+                                <th 
+                                  onClick={() => {
+                                    setProfileSortField('name');
+                                    setProfileSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                                  }}
+                                  className="p-2 cursor-pointer hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Profile Name
+                                </th>
+                                <th 
+                                  onClick={() => {
+                                    setProfileSortField('resolutionType');
+                                    setProfileSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                                  }}
+                                  className="p-2 cursor-pointer hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Type
+                                </th>
+                                <th 
+                                  onClick={() => {
+                                    setProfileSortField('resolution');
+                                    setProfileSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                                  }}
+                                  className="p-2 cursor-pointer hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Resolution
+                                </th>
+                                <th 
+                                  onClick={() => {
+                                    setProfileSortField('fps');
+                                    setProfileSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                                  }}
+                                  className="p-2 cursor-pointer hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  FPS
+                                </th>
+                                <th className="p-2">Codec</th>
+                                <th 
+                                  onClick={() => {
+                                    setProfileSortField('bitrate');
+                                    setProfileSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                                  }}
+                                  className="p-2 cursor-pointer hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Bitrate
+                                </th>
+                                <th 
+                                  onClick={() => {
+                                    setProfileSortField('audioEnabled');
+                                    setProfileSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                                  }}
+                                  className="p-2 cursor-pointer hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Audio
+                                </th>
+                                <th className="p-2">Est. Metrics</th>
+                                <th className="p-2 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-800/40 text-[10px]">
+                              {([...profilesList]
+                                .filter(p => {
+                                  if (!profileSearchQuery) return true;
+                                  const q = profileSearchQuery.toLowerCase();
+                                  return (
+                                    p.name.toLowerCase().includes(q) ||
+                                    p.resolutionType.toLowerCase().includes(q) ||
+                                    (p.videoCodec && p.videoCodec.toLowerCase().includes(q))
+                                  );
+                                })
+                                .sort((a, b) => {
+                                  let valA: any = a[profileSortField];
+                                  let valB: any = b[profileSortField];
+
+                                  if (profileSortField === 'estCpu') {
+                                    valA = getEstimatedCpuUsage(a);
+                                    valB = getEstimatedCpuUsage(b);
+                                  } else if (profileSortField === 'estBitrate') {
+                                    valA = getEstimatedBitrate(a);
+                                    valB = getEstimatedBitrate(b);
+                                  } else if (profileSortField === 'resolution') {
+                                    valA = (Number(a.width) || 0) * (Number(a.height) || 0);
+                                    valB = (Number(b.width) || 0) * (Number(b.height) || 0);
+                                  }
+
+                                  if (typeof valA === 'string') {
+                                    return profileSortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                  } else {
+                                    return profileSortOrder === 'asc' ? (valA > valB ? 1 : -1) : (valB > valA ? 1 : -1);
+                                  }
+                                })
+                              ).map((p, idx) => {
+                                const cpuUsage = getEstimatedCpuUsage(p);
+                                const outBitrate = getEstimatedBitrate(p);
+                                return (
+                                  <tr 
+                                    key={p.id}
+                                    draggable
+                                    onDragStart={() => setDraggedIndex(idx)}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={() => {
+                                      if (draggedIndex === null) return;
+                                      const items = [...profilesList];
+                                      const draggedItem = items[draggedIndex];
+                                      items.splice(draggedIndex, 1);
+                                      items.splice(idx, 0, draggedItem);
+                                      setProfilesList(items);
+                                      setDraggedIndex(null);
+                                    }}
+                                    className={`hover:bg-zinc-900/40 transition-colors border-l-2 cursor-grab active:cursor-grabbing ${p.enabled ? 'border-l-blue-500' : 'border-l-zinc-700 opacity-60'}`}
+                                  >
+                                    {/* Enable / Disable toggle */}
+                                    <td className="p-2 select-none">
+                                      <input 
+                                        type="checkbox"
+                                        checked={p.enabled}
+                                        onChange={() => handleToggleProfile(p.id)}
+                                        className="accent-blue-500 cursor-pointer w-3 h-3"
+                                      />
+                                    </td>
+
+                                    {/* Profile Name */}
+                                    <td className="p-2 font-bold text-zinc-100 truncate max-w-[100px]" title={p.name}>
+                                      {p.name}
+                                    </td>
+
+                                    {/* Resolution Type */}
+                                    <td className="p-2">
+                                      <span className="text-[8px] bg-zinc-800 text-zinc-300 border border-zinc-700 px-1 py-0.5 rounded uppercase font-mono font-bold">
+                                        {p.resolutionType === 'Custom Resolution' ? 'Custom' : p.resolutionType.replace(' Full HD', '').replace(' HD', '')}
+                                      </span>
+                                    </td>
+
+                                    {/* Dimensions */}
+                                    <td className="p-2 font-mono text-zinc-300">
+                                      {p.width === 0 ? 'Audio Only' : `${p.width}x${p.height}`}
+                                    </td>
+
+                                    {/* FPS */}
+                                    <td className="p-2 font-mono text-zinc-400">
+                                      {p.width === 0 ? '—' : `${p.fps} fps`}
+                                    </td>
+
+                                    {/* Video Codec */}
+                                    <td className="p-2 font-mono text-zinc-400">
+                                      {p.width === 0 ? '—' : (p.videoCodec || 'H.264')}
+                                    </td>
+
+                                    {/* Video Bitrate */}
+                                    <td className="p-2 font-mono text-zinc-300">
+                                      {p.width === 0 ? '—' : `${p.bitrate}k`}
+                                    </td>
+
+                                    {/* Audio Config */}
+                                    <td className="p-2">
+                                      {p.audioEnabled ? (
+                                        <span className="text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1 rounded uppercase font-bold font-mono">
+                                          {p.audioCodec.toUpperCase()}:{p.audioBitrate}k
+                                        </span>
+                                      ) : (
+                                        <span className="text-[8px] bg-red-500/10 text-red-400 border border-red-500/20 px-1 rounded uppercase font-bold font-mono">
+                                          Muted
+                                        </span>
+                                      )}
+                                    </td>
+
+                                    {/* Metrics estimation */}
+                                    <td className="p-2 space-y-1">
+                                      <div className="flex gap-1">
+                                        <span className={`text-[8px] px-1 rounded font-bold font-mono uppercase ${cpuUsage > 30 ? 'bg-red-500/10 text-red-400 border border-red-500/20' : cpuUsage > 15 ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                                          Est.CPU: {cpuUsage}%
+                                        </span>
+                                        <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-bold font-mono uppercase">
+                                          {outBitrate}k
+                                        </span>
+                                      </div>
+                                    </td>
+
+                                    {/* Actions cell */}
+                                    <td className="p-2 text-right">
+                                      <div className="flex gap-1 justify-end items-center">
+                                        <button
+                                          onClick={() => setEditingProfile(p)}
+                                          className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors"
+                                          title="Edit settings"
+                                        >
+                                          <Sliders className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          onClick={() => handleDuplicateProfile(p)}
+                                          className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-blue-400 transition-colors"
+                                          title="Duplicate Profile"
+                                        >
+                                          <Copy className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          onClick={() => handleDeleteProfile(p.id, p.name)}
+                                          disabled={isDeletingProfile !== null}
+                                          className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                          title={isDeletingProfile === p.id ? "Deleting..." : "Delete profile"}
+                                        >
+                                          {isDeletingProfile === p.id ? (
+                                            <span className="text-xs animate-pulse">⌛</span>
+                                          ) : (
+                                            <Trash2 className="w-3 h-3" />
+                                          )}
+                                        </button>
+                                        <div className="flex flex-col gap-0.5">
+                                          <button
+                                            onClick={() => handleMoveProfile(p.id, 'up')}
+                                            disabled={idx === 0}
+                                            className="p-0.5 hover:bg-zinc-800 rounded text-zinc-500 hover:text-white disabled:opacity-30"
+                                            title="Move Up"
+                                          >
+                                            ▲
+                                          </button>
+                                          <button
+                                            onClick={() => handleMoveProfile(p.id, 'down')}
+                                            disabled={idx === profilesList.length - 1}
+                                            className="p-0.5 hover:bg-zinc-800 rounded text-zinc-500 hover:text-white disabled:opacity-30"
+                                            title="Move Down"
+                                          >
+                                            ▼
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Edit Profile Modal Overlay */}
+                  {editingProfile && (() => {
+                    const validationErrors = validateProfile(editingProfile, profilesList);
+                    return (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                        <div className="bg-zinc-950 border border-zinc-800 rounded-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] shadow-2xl">
+                          {/* Modal Header */}
+                          <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/60">
+                            <div className="flex items-center gap-2">
+                              <Monitor className="w-4 h-4 text-blue-500" />
+                              <h3 className="text-sm font-bold text-zinc-100">Configure Profile: {editingProfile.name}</h3>
+                            </div>
+                            <button
+                              onClick={() => setEditingProfile(null)}
+                              className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Modal Content */}
+                          <div className="p-4 overflow-y-auto space-y-4 max-h-[60vh] no-scrollbar">
+                            {/* Live error notifier */}
+                            {validationErrors.length > 0 && (
+                              <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-2.5 rounded-lg text-[10px] space-y-1 font-mono">
+                                <p className="font-bold uppercase tracking-wider flex items-center gap-1 text-red-400/90">
+                                  ⚠️ Profile Validation Warnings:
+                                </p>
+                                {validationErrors.map((err, idx) => (
+                                  <div key={idx} className="flex items-start gap-1">
+                                    <span>•</span>
+                                    <span>{err}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Section 1: General Specs */}
+                            <div className="space-y-3 bg-zinc-900/20 p-3 rounded-lg border border-zinc-800/50">
+                              <span className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider block border-b border-zinc-800 pb-1">Video Configuration</span>
+                              
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-[8px] text-zinc-500 font-bold uppercase">Profile Name</label>
+                                  <input
+                                    type="text"
+                                    value={editingProfile.name}
+                                    onChange={(e) => setEditingProfile({ ...editingProfile, name: e.target.value })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-200"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[8px] text-zinc-500 font-bold uppercase">Resolution Type</label>
+                                  <select
+                                    value={editingProfile.resolutionType}
+                                    onChange={(e) => {
+                                      const type = e.target.value;
+                                      let w = editingProfile.width;
+                                      let h = editingProfile.height;
+                                      let fps = editingProfile.fps;
+                                      let br = editingProfile.bitrate;
+                                      let aspect = editingProfile.aspectRatio || '16:9';
+
+                                      if (type === '720p HD') {
+                                        w = 1280; h = 720; fps = 30; br = 2500; aspect = '16:9';
+                                      } else if (type === '1080p Full HD') {
+                                        w = 1920; h = 1080; fps = 30; br = 4500; aspect = '16:9';
+                                      } else if (type === '2K QHD') {
+                                        w = 2560; h = 1440; fps = 60; br = 8000; aspect = '16:9';
+                                      } else if (type === '4K UHD') {
+                                        w = 3840; h = 2160; fps = 60; br = 12000; aspect = '16:9';
+                                      }
+
+                                      setEditingProfile({
+                                        ...editingProfile,
+                                        resolutionType: type,
+                                        width: w,
+                                        height: h,
+                                        fps: fps,
+                                        bitrate: br,
+                                        aspectRatio: aspect
+                                      });
+                                    }}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                  >
+                                    <option value="720p HD">720p HD</option>
+                                    <option value="1080p Full HD">1080p Full HD</option>
+                                    <option value="2K QHD">2K QHD</option>
+                                    <option value="4K UHD">4K UHD</option>
+                                    <option value="Custom Resolution">Custom Resolution</option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-[8px] text-zinc-500 font-bold uppercase">Width</label>
+                                  <input
+                                    type="number"
+                                    disabled={editingProfile.resolutionType !== 'Custom Resolution'}
+                                    value={editingProfile.width}
+                                    onChange={(e) => setEditingProfile({ ...editingProfile, width: Number(e.target.value) })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[11px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200 disabled:opacity-40"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[8px] text-zinc-500 font-bold uppercase">Height</label>
+                                  <input
+                                    type="number"
+                                    disabled={editingProfile.resolutionType !== 'Custom Resolution'}
+                                    value={editingProfile.height}
+                                    onChange={(e) => setEditingProfile({ ...editingProfile, height: Number(e.target.value) })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[11px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200 disabled:opacity-40"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[8px] text-zinc-500 font-bold uppercase">FPS</label>
+                                  <input
+                                    type="number"
+                                    disabled={editingProfile.resolutionType !== 'Custom Resolution'}
+                                    value={editingProfile.fps}
+                                    onChange={(e) => setEditingProfile({ ...editingProfile, fps: Number(e.target.value) })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[11px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200 disabled:opacity-40"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-[8px] text-zinc-500 font-bold uppercase">Video Codec</label>
+                                  <select
+                                    value={editingProfile.videoCodec}
+                                    onChange={(e) => setEditingProfile({ ...editingProfile, videoCodec: e.target.value })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                  >
+                                    <option value="H.264">H.264 (libx264)</option>
+                                    <option value="H.265">H.265 (libx265)</option>
+                                    <option value="AV1">AV1 (libsvtav1)</option>
+                                  </select>
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[8px] text-zinc-500 font-bold uppercase">Video Bitrate (kbps)</label>
+                                  <input
+                                    type="number"
+                                    value={editingProfile.bitrate}
+                                    onChange={(e) => setEditingProfile({ ...editingProfile, bitrate: Number(e.target.value) })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[11px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
+                                  />
+                                </div>
+                              </div>
+
+                              {editingProfile.resolutionType === 'Custom Resolution' && (
+                                <div className="space-y-3 pt-2 border-t border-zinc-800/40 animate-in fade-in duration-200">
+                                  <div className="grid grid-cols-3 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Max Bitrate (kbps)</label>
+                                      <input
+                                        type="number"
+                                        value={editingProfile.maxBitrate || ''}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, maxBitrate: Number(e.target.value) || undefined })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[11px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Buffer Size (kb)</label>
+                                      <input
+                                        type="number"
+                                        value={editingProfile.bufferSize || ''}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, bufferSize: Number(e.target.value) || undefined })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[11px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Aspect Ratio</label>
+                                      <select
+                                        value={editingProfile.aspectRatio || '16:9'}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, aspectRatio: e.target.value })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                      >
+                                        <option value="16:9">16:9</option>
+                                        <option value="4:3">4:3</option>
+                                        <option value="21:9">21:9</option>
+                                        <option value="1:1">1:1</option>
+                                        <option value="custom">custom</option>
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Scaling Algorithm</label>
+                                      <select
+                                        value={editingProfile.scalingAlgorithm || 'bicubic'}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, scalingAlgorithm: e.target.value })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                      >
+                                        <option value="bicubic">Bicubic</option>
+                                        <option value="bilinear">Bilinear</option>
+                                        <option value="lanczos">Lanczos</option>
+                                        <option value="neighbor">Nearest</option>
+                                      </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Keyframe GOP Size</label>
+                                      <input
+                                        type="number"
+                                        value={editingProfile.keyframeInterval || ''}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, keyframeInterval: Number(e.target.value) || undefined })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[11px] font-mono focus:outline-none focus:border-blue-500 text-zinc-200"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Pixel Format</label>
+                                      <select
+                                        value={editingProfile.pixelFormat || 'yuv420p'}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, pixelFormat: e.target.value })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                      >
+                                        <option value="yuv420p">yuv420p</option>
+                                        <option value="yuv422p">yuv422p</option>
+                                        <option value="yuv444p">yuv444p</option>
+                                      </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Encoder Preset</label>
+                                      <select
+                                        value={editingProfile.encoderPreset || 'veryfast'}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, encoderPreset: e.target.value })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                      >
+                                        <option value="ultrafast">ultrafast</option>
+                                        <option value="superfast">superfast</option>
+                                        <option value="veryfast">veryfast</option>
+                                        <option value="faster">faster</option>
+                                        <option value="fast">fast</option>
+                                        <option value="medium">medium</option>
+                                        <option value="slow">slow</option>
+                                        <option value="slower">slower</option>
+                                      </select>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Section 2: Audio Config */}
+                            <div className="space-y-3 bg-emerald-950/10 p-3 rounded-lg border border-emerald-900/30">
+                              <div className="flex items-center justify-between border-b border-emerald-900/20 pb-1">
+                                <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider block">Audio Stream Configuration</span>
+                                <label className="flex items-center gap-1.5 text-[9px] text-emerald-400 uppercase font-bold cursor-pointer">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={editingProfile.audioEnabled} 
+                                    onChange={(e) => setEditingProfile({ ...editingProfile, audioEnabled: e.target.checked })} 
+                                    className="accent-emerald-500 rounded"
+                                  />
+                                  Enable Audio
+                                </label>
+                              </div>
+
+                              {editingProfile.audioEnabled && (
+                                <div className="space-y-3 animate-in fade-in duration-200">
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Audio Codec</label>
+                                      <select
+                                        value={editingProfile.audioCodec}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, audioCodec: e.target.value })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                      >
+                                        <option value="aac">AAC (LC)</option>
+                                        <option value="opus">Opus</option>
+                                        <option value="mp3">MP3 (lame)</option>
+                                        <option value="pcm">PCM (Uncompressed)</option>
+                                      </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Audio Bitrate</label>
+                                      <select
+                                        value={editingProfile.audioBitrate}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, audioBitrate: Number(e.target.value) })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                      >
+                                        <option value="64">64 kbps</option>
+                                        <option value="96">96 kbps</option>
+                                        <option value="128">128 kbps</option>
+                                        <option value="160">160 kbps</option>
+                                        <option value="192">192 kbps</option>
+                                        <option value="256">256 kbps</option>
+                                        <option value="320">320 kbps</option>
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Sample Rate</label>
+                                      <select
+                                        value={editingProfile.audioSampleRate}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, audioSampleRate: Number(e.target.value) })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                      >
+                                        <option value="32000">32000 Hz</option>
+                                        <option value="44100">44100 Hz</option>
+                                        <option value="48000">48000 Hz</option>
+                                      </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[8px] text-zinc-500 font-bold uppercase">Channels</label>
+                                      <select
+                                        value={editingProfile.audioChannels}
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, audioChannels: e.target.value })}
+                                        className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1.5 text-[11px] focus:outline-none focus:border-blue-500 text-zinc-300"
+                                      >
+                                        <option value="mono">Mono (1.0)</option>
+                                        <option value="stereo">Stereo (2.0)</option>
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                  {/* Volume Slider & Normalize */}
+                                  <div className="grid grid-cols-2 gap-3 items-center">
+                                    <div className="space-y-1 bg-zinc-900/40 p-2 rounded border border-zinc-800/60">
+                                      <div className="flex justify-between items-center text-[8px] text-zinc-400 font-bold uppercase">
+                                        <span>Volume</span>
+                                        <span className="text-emerald-400">{editingProfile.audioVolume}%</span>
+                                      </div>
+                                      <input 
+                                        type="range" 
+                                        min="0" 
+                                        max="200" 
+                                        step="5"
+                                        value={editingProfile.audioVolume} 
+                                        onChange={(e) => setEditingProfile({ ...editingProfile, audioVolume: Number(e.target.value) })} 
+                                        className="w-full accent-emerald-500 h-1 rounded bg-zinc-800 cursor-pointer"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="flex items-center gap-2 bg-zinc-900/40 p-3 rounded border border-zinc-800/60 cursor-pointer select-none">
+                                        <input 
+                                          type="checkbox" 
+                                          checked={editingProfile.audioNormalize} 
+                                          onChange={(e) => setEditingProfile({ ...editingProfile, audioNormalize: e.target.checked })} 
+                                          className="accent-emerald-500"
+                                        />
+                                        <span className="text-[10px] text-zinc-300 font-bold uppercase">Normalize Audio</span>
+                                      </label>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Modal Footer */}
+                          <div className="p-4 border-t border-zinc-800 bg-zinc-900/40 flex justify-end gap-2 shrink-0">
+                            <button
+                              onClick={() => setEditingProfile(null)}
+                              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded text-[10px] font-bold uppercase transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              disabled={validationErrors.length > 0}
+                              onClick={() => {
+                                if (validationErrors.length > 0) return;
+                                setProfilesList(prev => prev.map(p => p.id === editingProfile.id ? editingProfile : p));
+                                setEditingProfile(null);
+                              }}
+                              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold uppercase transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              Apply Changes
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* LIVE FFmpeg Command Preview */}
+                  <div className="bg-black/90 p-2 rounded-lg border border-zinc-800 font-mono text-[9px] text-zinc-400 space-y-1">
+                    <div className="flex items-center justify-between text-[8px] text-zinc-500 uppercase tracking-widest font-sans font-bold">
+                      <span>FFmpeg Command Preview</span>
+                      <span className="text-blue-400">Live Generated</span>
+                    </div>
+                    <div className="bg-zinc-950 p-2 rounded border border-zinc-900 overflow-x-auto whitespace-pre-wrap select-all font-mono text-blue-300 leading-relaxed max-h-[120px] no-scrollbar">
+                      {previewCommand || 'ffmpeg -re ...'}
                     </div>
                   </div>
 
@@ -1720,7 +2799,24 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
                         preset: customPreset,
                         profile: customProfile,
                         pixelFormat: customPixelFormat,
-                        enabledProfiles: customEnabledProfiles.join(',')
+                        enabledProfiles: customEnabledProfiles.join(','),
+                        gopSize: Number(customGopSize),
+                        bufferSize: Number(customBufferSize),
+                        maxBitrate: Number(customMaxBitrate),
+                        scalingAlgorithm: customScalingAlgorithm,
+                        audioEnabled: customAudioEnabled,
+                        audioBitrate: `${customAudioBitrate}k`,
+                        audioSampleRate: Number(customAudioSampleRate),
+                        audioChannels: customAudioChannels,
+                        audioVolume: Number(customAudioVolume),
+                        audioNormalize: customAudioNormalize,
+                        audioNoiseReduction: customAudioNoiseReduction,
+                        audioDelay: Number(customAudioDelay),
+                        audioLanguage: customAudioLanguage,
+                        audioTrackSelection: customAudioTrackSelection,
+                        audioPassthrough: customAudioPassthrough,
+                        audioTranscoding: customAudioTranscoding,
+                        profilesJson: customProfilesJson
                       })}
                       className="px-1.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-[8px] font-black uppercase tracking-tighter flex flex-col items-center justify-center gap-1 cursor-pointer"
                       title="Clone Settings to All Stream Panels"
@@ -1748,12 +2844,12 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
                       </div>
                       <div className="space-y-1 font-mono text-[9px]">
                         {Object.entries(testReport).map(([service, val]: any) => (
-                          <div key={service} className="flex justify-between items-center bg-black/30 px-1.5 py-0.5 rounded">
-                            <span className="text-zinc-500">{service}:</span>
-                            <span className={val.status === 'PASS' ? 'text-emerald-400' : val.status === 'FAIL' ? 'text-red-400' : 'text-amber-400'}>
-                              {val.status} ({val.reason})
-                            </span>
-                          </div>
+                           <div key={service} className="flex justify-between items-center bg-black/30 px-1.5 py-0.5 rounded">
+                             <span className="text-zinc-500">{service}:</span>
+                             <span className={val.status === 'PASS' ? 'text-emerald-400' : val.status === 'FAIL' ? 'text-red-400' : 'text-amber-400'}>
+                               {val.status} ({val.reason})
+                             </span>
+                           </div>
                         ))}
                       </div>
                     </div>

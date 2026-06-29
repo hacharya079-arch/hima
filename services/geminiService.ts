@@ -1,10 +1,21 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Fix: Use process.env.API_KEY directly for initialization as per guidelines
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let aiInstance: GoogleGenAI | null = null;
+
+function getAi() {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY or API_KEY environment variable is required for Gemini services.");
+    }
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+}
 
 export const analyzeStreamContext = async (title: string, broadcaster: string) => {
   try {
+    const ai = getAi();
     const response = await ai.models.generateContent({
       model: 'gemini-3.5-flash',
       contents: `Based on a live stream titled "${title}" by ${broadcaster}, generate 3 engaging tags and a short catchy description for a viewer dashboard. Output as JSON.`,
@@ -22,6 +33,7 @@ export const analyzeStreamContext = async (title: string, broadcaster: string) =
 
 export const generateStreamThumbnail = async (title: string, broadcaster: string): Promise<string | null> => {
   try {
+    const ai = getAi();
     const prompt = `A professional, vibrant, and cinematic digital art piece for a video stream thumbnail. The stream is titled "${title}" and hosted by "${broadcaster}". The style should be high-contrast, modern, and energetic, suitable for a professional broadcasting platform. Avoid text unless it's integrated stylistically.`;
     
     const response = await ai.models.generateContent({
@@ -52,6 +64,7 @@ export const generateStreamThumbnail = async (title: string, broadcaster: string
 
 export const getAiModeratorResponse = async (chatHistory: string, lastMessage: string) => {
   try {
+    const ai = getAi();
     const response = await ai.models.generateContent({
       model: 'gemini-3.5-flash',
       contents: `You are an AI moderator for a professional RTMP stream. 

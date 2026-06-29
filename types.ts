@@ -40,3 +40,70 @@ export interface ChatMessage {
   timestamp: string;
   isAi?: boolean;
 }
+
+export interface Device {
+  id: string;
+  name: string;
+  location?: string;
+  description?: string;
+  os_version?: string;
+  player_version?: string;
+  ip_address?: string;
+  mac_address?: string;
+  last_seen?: string;
+  online_status: 'online' | 'offline' | 'playing' | 'buffering' | 'stopped' | 'disconnected';
+  current_stream_id?: string;
+  current_stream_url?: string;
+  current_resolution?: string;
+  current_volume: number;
+  current_playback_status?: string;
+  pairing_code?: string;
+  paired: boolean;
+  token?: string;
+  cpu_usage?: number;
+  ram_usage?: number;
+  temperature?: number;
+  network_speed?: string;
+  screenshot_url?: string;
+  screenshot_time?: string;
+  brightness?: number;
+  rotation?: string;
+  player_settings?: string;
+  network_settings?: string;
+  client_version?: string;
+}
+
+export interface DeviceGroup {
+  id: string;
+  name: string;
+  description?: string;
+  devices?: Device[];
+}
+
+export interface PlaybackHistory {
+  id: string;
+  device_id: string;
+  stream_id?: string;
+  stream_url?: string;
+  action: string;
+  timestamp: string;
+}
+
+export interface DeviceLog {
+  id: string;
+  device_id: string;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  timestamp: string;
+}
+
+export interface DeviceSchedule {
+  id: string;
+  device_id?: string;
+  group_id?: string;
+  time: string;
+  action: 'play' | 'stop';
+  stream_id?: string;
+  stream_url?: string;
+  enabled: boolean;
+}

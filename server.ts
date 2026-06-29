@@ -9,6 +9,8 @@ import { exec, spawn } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { db } from './server/db.ts';
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
 
 // Load environment variables
 dotenv.config();
@@ -165,6 +167,21 @@ async function startServer() {
     preset: string;
     profile: string;
     pixelFormat: string;
+    gopSize?: number;
+    bufferSize?: number;
+    maxBitrate?: number;
+    scalingAlgorithm?: string;
+    audioEnabled?: boolean;
+    audioSampleRate?: number;
+    audioChannels?: string;
+    audioVolume?: number;
+    audioNormalize?: boolean;
+    audioNoiseReduction?: boolean;
+    audioDelay?: number;
+    audioLanguage?: string;
+    audioTrackSelection?: string;
+    audioPassthrough?: boolean;
+    audioTranscoding?: boolean;
   }
 
   const getResolutionPreset = (resolution: string, customData?: any): ResolutionSpec => {
@@ -209,6 +226,21 @@ async function startServer() {
         preset: String(customData?.preset || 'veryfast'),
         profile: String(customData?.profile || 'main'),
         pixelFormat: String(customData?.pixelFormat || 'yuv420p'),
+        gopSize: customData?.gopSize,
+        bufferSize: customData?.bufferSize,
+        maxBitrate: customData?.maxBitrate,
+        scalingAlgorithm: customData?.scalingAlgorithm,
+        audioEnabled: customData?.audioEnabled !== false,
+        audioSampleRate: customData?.audioSampleRate,
+        audioChannels: customData?.audioChannels,
+        audioVolume: customData?.audioVolume,
+        audioNormalize: customData?.audioNormalize,
+        audioNoiseReduction: customData?.audioNoiseReduction,
+        audioDelay: customData?.audioDelay,
+        audioLanguage: customData?.audioLanguage,
+        audioTrackSelection: customData?.audioTrackSelection,
+        audioPassthrough: customData?.audioPassthrough,
+        audioTranscoding: customData?.audioTranscoding !== false,
       };
     }
 
@@ -217,6 +249,178 @@ async function startServer() {
       name: lookupKey,
       ...spec
     };
+  };
+
+  const getActiveOutputProfiles = (
+    resolution: string,
+    enabledProfilesStr?: string,
+    profilesJson?: string,
+    customData?: any
+  ): any[] => {
+    let parsed: any[] = [];
+    if (profilesJson) {
+      try {
+        const parsedRaw = JSON.parse(profilesJson);
+        if (Array.isArray(parsedRaw)) {
+          parsed = parsedRaw;
+        }
+      } catch (e) {
+        console.error("[Streaming Engine] Error parsing profilesJson:", e);
+      }
+    }
+
+    if (parsed.length > 0) {
+      return parsed.filter((p: any) => p.enabled !== false);
+    }
+
+    let activeProfiles = [resolution];
+    if (enabledProfilesStr) {
+      activeProfiles = enabledProfilesStr.split(',').map(p => p.trim()).filter(Boolean);
+    }
+    if (!activeProfiles.includes(resolution)) {
+      activeProfiles.unshift(resolution);
+    }
+
+    return activeProfiles.map(pName => {
+      const presetSpec = getResolutionPreset(pName, customData);
+      return {
+        id: pName,
+        enabled: true,
+        name: pName,
+        resolutionType: pName,
+        width: presetSpec.width,
+        height: presetSpec.height,
+        fps: presetSpec.fps,
+        videoCodec: presetSpec.videoCodec === 'libx264' || presetSpec.videoCodec === 'H.264' ? 'H.264' :
+                    presetSpec.videoCodec === 'libx265' || presetSpec.videoCodec === 'H.265' ? 'H.265' :
+                    presetSpec.videoCodec === 'libsvtav1' || presetSpec.videoCodec === 'AV1' ? 'AV1' : 'H.264',
+        bitrate: parseInt(presetSpec.videoBitrate) || 2500,
+        encoderPreset: presetSpec.preset || 'veryfast',
+        profile: presetSpec.profile || 'main',
+        pixelFormat: presetSpec.pixelFormat || 'yuv420p',
+        keyframeInterval: presetSpec.gopSize || (presetSpec.fps || 30) * 2,
+        maxBitrate: presetSpec.maxBitrate || (parseInt(presetSpec.videoBitrate) || 2500) * 1.2,
+        bufferSize: presetSpec.bufferSize || (parseInt(presetSpec.videoBitrate) || 2500) * 2,
+        scalingAlgorithm: presetSpec.scalingAlgorithm || 'bicubic',
+        audioEnabled: presetSpec.audioEnabled !== false,
+        audioCodec: presetSpec.audioCodec || 'aac',
+        audioBitrate: parseInt(presetSpec.audioBitrate) || 128,
+        audioSampleRate: presetSpec.audioSampleRate || 44100,
+        audioChannels: presetSpec.audioChannels || 'stereo',
+        audioVolume: presetSpec.audioVolume || 100,
+        audioNormalize: presetSpec.audioNormalize || false
+      };
+    });
+  };
+
+  const generateFfmpegArguments = (finalActiveProfiles: any[], hlsDir: string): string[] => {
+    const ffmpegArgs: string[] = ['-re'];
+    if (finalActiveProfiles.length === 0) {
+      return ffmpegArgs;
+    }
+
+    const rate = finalActiveProfiles[0]?.fps || 30;
+    ffmpegArgs.push('-f', 'lavfi', '-i', `testsrc=size=1920x1080:rate=${rate}`);
+    ffmpegArgs.push('-f', 'lavfi', '-i', 'sine=frequency=440');
+
+    finalActiveProfiles.forEach((p) => {
+      const safeName = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      
+      if (p.width > 0) {
+        ffmpegArgs.push('-map', '0:v');
+      }
+      if (p.audioEnabled !== false) {
+        ffmpegArgs.push('-map', '1:a');
+      }
+
+      if (p.width > 0) {
+        let videoFilter = `drawtext=text='StreamPulse Transcoder [${p.name}] - %{localtime\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=40:y=40:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.6`;
+        const scalingFlags = p.scalingAlgorithm ? `:flags=${p.scalingAlgorithm}` : '';
+        videoFilter += `,scale=${p.width}:${p.height}${scalingFlags}`;
+        ffmpegArgs.push('-vf', videoFilter);
+
+        if (p.fps > 0) {
+          ffmpegArgs.push('-r', String(p.fps));
+        }
+
+        const vcodec = p.videoCodec === 'H.265' || p.videoCodec === 'libx265' ? 'libx265' : 
+                       p.videoCodec === 'AV1' || p.videoCodec === 'libsvtav1' ? 'libsvtav1' : 'libx264';
+        ffmpegArgs.push('-c:v', vcodec);
+        
+        const vBitrate = String(p.bitrate).endsWith('k') ? p.bitrate : `${p.bitrate}k`;
+        ffmpegArgs.push('-b:v', vBitrate);
+        
+        if (p.encoderPreset) {
+          ffmpegArgs.push('-preset', p.encoderPreset);
+        }
+        if (p.profile && vcodec !== 'libsvtav1') {
+          ffmpegArgs.push('-profile:v', p.profile);
+        }
+        if (p.pixelFormat) {
+          ffmpegArgs.push('-pix_fmt', p.pixelFormat);
+        }
+        
+        const gop = p.keyframeInterval ? p.keyframeInterval : (p.fps || 30) * 2;
+        ffmpegArgs.push('-g', String(gop));
+
+        if (p.maxBitrate) {
+          ffmpegArgs.push('-maxrate', `${p.maxBitrate}k`);
+        }
+        if (p.bufferSize) {
+          ffmpegArgs.push('-bufsize', `${p.bufferSize}k`);
+        }
+      } else {
+        ffmpegArgs.push('-vn');
+      }
+
+      if (p.audioEnabled === false) {
+        ffmpegArgs.push('-an');
+      } else {
+        const acodec = p.audioCodec === 'opus' || p.audioCodec === 'libopus' ? 'libopus' :
+                       p.audioCodec === 'mp3' || p.audioCodec === 'libmp3lame' ? 'libmp3lame' : 'aac';
+        ffmpegArgs.push('-c:a', acodec);
+        
+        const aBitrate = String(p.audioBitrate).endsWith('k') ? p.audioBitrate : `${p.audioBitrate}k`;
+        ffmpegArgs.push('-b:a', aBitrate);
+        
+        if (p.audioSampleRate) {
+          ffmpegArgs.push('-ar', String(p.audioSampleRate));
+        }
+
+        if (p.audioChannels) {
+          const chanVal = p.audioChannels === 'mono' ? '1' : 
+                          p.audioChannels === 'stereo' ? '2' : 
+                          p.audioChannels === '5.1' ? '6' : 
+                          p.audioChannels === '7.1' ? '8' : '2';
+          ffmpegArgs.push('-ac', chanVal);
+        } else {
+          ffmpegArgs.push('-ac', '2');
+        }
+
+        const audioFilters: string[] = [];
+        if (p.audioVolume !== undefined && p.audioVolume !== 100) {
+          audioFilters.push(`volume=${p.audioVolume / 100}`);
+        }
+        if (p.audioNormalize === true) {
+          audioFilters.push('loudnorm');
+        }
+        if (audioFilters.length > 0) {
+          ffmpegArgs.push('-af', audioFilters.join(','));
+        }
+      }
+
+      ffmpegArgs.push(
+        '-f', 'hls',
+        '-hls_time', '4',
+        '-hls_list_size', '5',
+        '-hls_flags', 'delete_segments',
+        '-master_pl_name', 'master.m3u8',
+        '-hls_segment_filename', path.join(hlsDir, safeName, 'file%03d.ts'),
+        path.join(hlsDir, safeName, 'index.m3u8')
+      );
+    });
+
+    return ffmpegArgs;
   };
 
   const startFfMpegTranscoder = async (streamKey: string) => {
@@ -246,52 +450,65 @@ async function startServer() {
         audioCodec: stream.audioCodec,
         preset: stream.preset,
         profile: stream.profile,
-        pixelFormat: stream.pixelFormat
+        pixelFormat: stream.pixelFormat,
+        gopSize: stream.gopSize,
+        bufferSize: stream.bufferSize,
+        maxBitrate: stream.maxBitrate,
+        scalingAlgorithm: stream.scalingAlgorithm,
+        audioEnabled: stream.audioEnabled,
+        audioBitrate: stream.audioBitrate,
+        audioSampleRate: stream.audioSampleRate,
+        audioChannels: stream.audioChannels,
+        audioVolume: stream.audioVolume,
+        audioNormalize: stream.audioNormalize,
+        audioNoiseReduction: stream.audioNoiseReduction,
+        audioDelay: stream.audioDelay,
+        audioLanguage: stream.audioLanguage,
+        audioTrackSelection: stream.audioTrackSelection,
+        audioPassthrough: stream.audioPassthrough,
+        audioTranscoding: stream.audioTranscoding,
+        profilesJson: stream.profilesJson
       };
     }
 
-    // Determine enabled profiles. Default to at least the primary selected resolution.
-    let activeProfiles = [resolution];
-    if (enabledProfilesStr) {
-      activeProfiles = enabledProfilesStr.split(',').map(p => p.trim()).filter(Boolean);
-    }
-    if (!activeProfiles.includes(resolution)) {
-      activeProfiles.unshift(resolution);
-    }
+    const finalActiveProfiles = getActiveOutputProfiles(
+      resolution,
+      enabledProfilesStr,
+      customData.profilesJson,
+      customData
+    );
 
-    console.log(`[Streaming Engine] Active transcode profiles for ${streamKey}:`, activeProfiles);
+    console.log(`[Streaming Engine] Active transcode profiles for ${streamKey}:`, finalActiveProfiles.map(p => p.name));
 
     // Write dynamic, valid master HLS playlist structure
     let masterContent = `#EXTM3U\n#EXT-X-VERSION:3\n`;
-    activeProfiles.forEach((profileName) => {
-      const spec = getResolutionPreset(profileName, customData);
-      const safeName = profileName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const videoBit = parseInt(spec.videoBitrate) || 2500;
-      const audioBit = parseInt(spec.audioBitrate) || 128;
-      const bandwidth = spec.name === 'Audio Only' ? audioBit * 1000 : (videoBit + audioBit) * 1000;
+    finalActiveProfiles.forEach((p) => {
+      const safeName = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const videoBit = Number(p.bitrate) || 2500;
+      const audioBit = p.audioEnabled ? (Number(p.audioBitrate) || 128) : 0;
+      const bandwidth = p.width === 0 ? audioBit * 1000 : (videoBit + audioBit) * 1000;
       
-      if (spec.name === 'Audio Only' || spec.width === 0) {
+      if (p.width === 0) {
         masterContent += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth}\n${safeName}/index.m3u8\n`;
       } else {
-        masterContent += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${spec.width}x${spec.height}\n${safeName}/index.m3u8\n`;
+        masterContent += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${p.width}x${p.height}\n${safeName}/index.m3u8\n`;
       }
     });
 
     // Write a beautiful, dynamic and compliant DASH manifest containing all enabled profiles
     let reps = '';
-    activeProfiles.forEach((profileName) => {
-      const spec = getResolutionPreset(profileName, customData);
-      const safeName = profileName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const videoBit = (parseInt(spec.videoBitrate) || 2500) * 1000;
-      const audioBit = (parseInt(spec.audioBitrate) || 128) * 1000;
+    finalActiveProfiles.forEach((p) => {
+      const safeName = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const videoBit = (Number(p.bitrate) || 2500) * 1000;
+      const audioBit = (p.audioEnabled ? (Number(p.audioBitrate) || 128) : 0) * 1000;
       
-      if (spec.name === 'Audio Only' || spec.width === 0) {
-        reps += `      <Representation id="${safeName}" mimeType="audio/mp4" codecs="mp4a.40.2" audioSamplingRate="44100" bandwidth="${audioBit}">
+      if (p.width === 0) {
+        reps += `      <Representation id="${safeName}" mimeType="audio/mp4" codecs="mp4a.40.2" audioSamplingRate="${p.audioSampleRate || 44100}" bandwidth="${audioBit}">
         <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
-        <SegmentTemplate timescale="44100" initialization="${safeName}/init.m4s" media="${safeName}/segment-$Number$.m4s" startNumber="1" duration="176400"/>
+        <SegmentTemplate timescale="${p.audioSampleRate || 44100}" initialization="${safeName}/init.m4s" media="${safeName}/segment-$Number$.m4s" startNumber="1" duration="${(p.audioSampleRate || 44100) * 4}"/>
       </Representation>\n`;
       } else {
-        reps += `      <Representation id="${safeName}" mimeType="video/mp4" codecs="avc1.64002a" width="${spec.width}" height="${spec.height}" frameRate="${spec.fps || 30}" bandwidth="${videoBit}">
+        reps += `      <Representation id="${safeName}" mimeType="video/mp4" codecs="avc1.64002a" width="${p.width}" height="${p.height}" frameRate="${p.fps || 30}" bandwidth="${videoBit}">
         <SegmentTemplate timescale="90000" initialization="${safeName}/init.m4s" media="${safeName}/segment-$Number$.m4s" startNumber="1" duration="360000"/>
       </Representation>\n`;
       }
@@ -317,8 +534,8 @@ ${reps}    </AdaptationSet>
       fs.writeFileSync(path.join(hlsDir, 'manifest.mpd'), dashContent);
       
       // Setup folders and playlist files for each active profile
-      activeProfiles.forEach((profileName) => {
-        const safeName = profileName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      finalActiveProfiles.forEach((p) => {
+        const safeName = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
         const subDir = path.join(hlsDir, safeName);
         if (!fs.existsSync(subDir)) {
           fs.mkdirSync(subDir, { recursive: true });
@@ -362,64 +579,7 @@ segment3.ts
       if (hasFfmpeg) {
         console.log(`[Streaming Engine] Spawning active FFmpeg background transcode process...`);
         
-        // Use primary resolution specs to configure FFmpeg command
-        const primarySpec = getResolutionPreset(resolution, customData);
-        const ffmpegArgs: string[] = ['-re'];
-
-        // Virtual Ingest inputs
-        ffmpegArgs.push('-f', 'lavfi', '-i', `testsrc=size=1920x1080:rate=${primarySpec.fps || 30}`);
-        ffmpegArgs.push('-f', 'lavfi', '-i', 'sine=frequency=440');
-
-        // Video filters
-        let videoFilter = `drawtext=text='StreamPulse Transcoder [${resolution}] - %{localtime\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=40:y=40:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.6`;
-        if (primarySpec.width > 0 && primarySpec.height > 0) {
-          videoFilter += `,scale=${primarySpec.width}:${primarySpec.height}`;
-        }
-        ffmpegArgs.push('-vf', videoFilter);
-
-        // Frame rate
-        if (primarySpec.fps > 0) {
-          ffmpegArgs.push('-r', String(primarySpec.fps));
-        }
-
-        // Video Encoding specs
-        if (primarySpec.name !== 'Audio Only' && primarySpec.width > 0) {
-          const vcodec = primarySpec.videoCodec === 'H.265' || primarySpec.videoCodec === 'libx265' ? 'libx265' : 
-                         primarySpec.videoCodec === 'AV1' || primarySpec.videoCodec === 'libsvtav1' ? 'libsvtav1' : 'libx264';
-          ffmpegArgs.push('-c:v', vcodec);
-          ffmpegArgs.push('-b:v', primarySpec.videoBitrate);
-          
-          if (primarySpec.preset) {
-            ffmpegArgs.push('-preset', primarySpec.preset);
-          }
-          if (primarySpec.profile && vcodec !== 'libsvtav1') {
-            ffmpegArgs.push('-profile:v', primarySpec.profile);
-          }
-          if (primarySpec.pixelFormat) {
-            ffmpegArgs.push('-pix_fmt', primarySpec.pixelFormat);
-          }
-          ffmpegArgs.push('-g', String((primarySpec.fps || 30) * 2));
-        } else {
-          ffmpegArgs.push('-vn');
-        }
-
-        // Audio Encoding specs
-        const acodec = primarySpec.audioCodec === 'opus' || primarySpec.audioCodec === 'libopus' ? 'libopus' : 'aac';
-        ffmpegArgs.push('-c:a', acodec);
-        ffmpegArgs.push('-b:a', primarySpec.audioBitrate);
-        ffmpegArgs.push('-ac', '2');
-
-        // HLS Dynamic packaging
-        const primarySafeName = resolution.toLowerCase().replace(/[^a-z0-9]/g, '');
-        ffmpegArgs.push(
-          '-f', 'hls',
-          '-hls_time', '4',
-          '-hls_list_size', '5',
-          '-hls_flags', 'delete_segments',
-          '-master_pl_name', 'master.m3u8',
-          '-hls_segment_filename', path.join(hlsDir, primarySafeName, 'file%03d.ts'),
-          path.join(hlsDir, primarySafeName, 'index.m3u8')
-        );
+        const ffmpegArgs = generateFfmpegArguments(finalActiveProfiles, hlsDir);
 
         console.log(`[Streaming Engine] FFmpeg generated args: ffmpeg ${ffmpegArgs.join(' ')}`);
 
@@ -558,6 +718,24 @@ segment3.ts
     }
   });
 
+  app.post('/api/streams/preview-command', authenticateToken, async (req: any, res: any) => {
+    try {
+      const { resolution, customData, enabledProfiles, profilesJson } = req.body;
+      const finalActiveProfiles = getActiveOutputProfiles(
+        resolution || '1080p',
+        enabledProfiles || '',
+        profilesJson || '',
+        customData || {}
+      );
+      
+      const args = generateFfmpegArguments(finalActiveProfiles, './data/hls/stream_key');
+      res.json({ command: 'ffmpeg ' + args.slice(1).join(' ') });
+    } catch (err) {
+      console.error('[Streaming Engine] Preview command generation failed:', err);
+      res.status(500).json({ error: 'Failed to generate preview command' });
+    }
+  });
+
   app.post('/api/streams', authenticateToken, async (req: any, res) => {
     const { title, broadcaster, resolution, scheduledStart } = req.body;
     if (!title || !broadcaster) {
@@ -579,10 +757,37 @@ segment3.ts
         scheduledStart: scheduledStart || undefined,
         rtmpUrl,
         resolution: resolution || '1080p',
-        bitrate: resolution === '4K' ? 10000 : resolution === '1080p' ? 6000 : 3500,
-        codec: 'H.264',
+        bitrate: req.body.bitrate || (resolution === '4K' ? 10000 : resolution === '1080p' ? 6000 : 3500),
+        codec: req.body.videoCodec || 'H.264',
         ingestIp,
-        startTime: scheduledStart ? undefined : new Date().toISOString()
+        startTime: scheduledStart ? undefined : new Date().toISOString(),
+        width: req.body.width,
+        height: req.body.height,
+        fps: req.body.fps,
+        aspectRatio: req.body.aspectRatio,
+        videoCodec: req.body.videoCodec,
+        audioCodec: req.body.audioCodec,
+        preset: req.body.preset,
+        profile: req.body.profile,
+        pixelFormat: req.body.pixelFormat,
+        enabledProfiles: req.body.enabledProfiles,
+        gopSize: req.body.gopSize,
+        bufferSize: req.body.bufferSize,
+        maxBitrate: req.body.maxBitrate,
+        scalingAlgorithm: req.body.scalingAlgorithm,
+        audioEnabled: req.body.audioEnabled !== false,
+        audioBitrate: req.body.audioBitrate,
+        audioSampleRate: req.body.audioSampleRate,
+        audioChannels: req.body.audioChannels,
+        audioVolume: req.body.audioVolume,
+        audioNormalize: req.body.audioNormalize,
+        audioNoiseReduction: req.body.audioNoiseReduction,
+        audioDelay: req.body.audioDelay,
+        audioLanguage: req.body.audioLanguage,
+        audioTrackSelection: req.body.audioTrackSelection,
+        audioPassthrough: req.body.audioPassthrough,
+        audioTranscoding: req.body.audioTranscoding !== false,
+        profilesJson: req.body.profilesJson
       });
 
       res.status(201).json(newStream);
@@ -593,9 +798,12 @@ segment3.ts
   });
 
   app.put('/api/streams/:id', authenticateToken, async (req, res) => {
-    const { resolution, width, height, fps, bitrate, videoCodec, audioCodec } = req.body;
+    const { 
+      resolution, width, height, fps, bitrate, videoCodec, audioCodec,
+      gopSize, bufferSize, maxBitrate, audioVolume, audioSampleRate, audioDelay
+    } = req.body;
     
-    // Validation for custom resolution settings
+    // Validation for resolution and advanced settings
     if (resolution === 'Custom Resolution') {
       if (width !== undefined) {
         const w = Number(width);
@@ -629,10 +837,49 @@ segment3.ts
         }
       }
       if (audioCodec !== undefined && audioCodec !== null) {
-        const allowedAudioCodecs = ['aac', 'opus', 'libopus', 'none'];
+        const allowedAudioCodecs = ['aac', 'opus', 'libopus', 'mp3', 'libmp3lame', 'none'];
         if (!allowedAudioCodecs.includes(audioCodec)) {
-          return res.status(400).json({ error: `Unsupported Audio Codec: ${audioCodec}. Supported: aac, opus.` });
+          return res.status(400).json({ error: `Unsupported Audio Codec: ${audioCodec}. Supported: aac, opus, mp3.` });
         }
+      }
+    }
+
+    // Additional validations
+    if (gopSize !== undefined && gopSize !== null) {
+      const g = Number(gopSize);
+      if (isNaN(g) || g < 1 || g > 1000) {
+        return res.status(400).json({ error: 'Invalid GOP (Keyframe interval) size. Must be between 1 and 1000.' });
+      }
+    }
+    if (bufferSize !== undefined && bufferSize !== null) {
+      const b = Number(bufferSize);
+      if (isNaN(b) || b < 10 || b > 500000) {
+        return res.status(400).json({ error: 'Invalid Buffer Size. Must be between 10k and 500000k.' });
+      }
+    }
+    if (maxBitrate !== undefined && maxBitrate !== null) {
+      const m = Number(maxBitrate);
+      if (isNaN(m) || m < 50 || m > 100000) {
+        return res.status(400).json({ error: 'Invalid Max Bitrate. Must be between 50k and 100000k.' });
+      }
+    }
+    if (audioVolume !== undefined && audioVolume !== null) {
+      const v = Number(audioVolume);
+      if (isNaN(v) || v < 0 || v > 200) {
+        return res.status(400).json({ error: 'Invalid Audio Volume. Must be between 0% and 200%.' });
+      }
+    }
+    if (audioSampleRate !== undefined && audioSampleRate !== null) {
+      const s = Number(audioSampleRate);
+      const allowedRates = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 96000];
+      if (!allowedRates.includes(s)) {
+        return res.status(400).json({ error: 'Unsupported Audio Sample Rate. E.g. 44100, 48000.' });
+      }
+    }
+    if (audioDelay !== undefined && audioDelay !== null) {
+      const d = Number(audioDelay);
+      if (isNaN(d) || d < 0 || d > 10000) {
+        return res.status(400).json({ error: 'Invalid Audio Delay. Must be between 0ms and 10000ms.' });
       }
     }
 
@@ -656,6 +903,64 @@ segment3.ts
       res.json({ message: 'Stream deleted successfully' });
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete stream' });
+    }
+  });
+
+  app.delete('/api/streams/:streamId/profiles/:profileId', authenticateToken, async (req, res) => {
+    try {
+      const { streamId, profileId } = req.params;
+      console.log(`[Streaming Engine] Received request to delete profile ${profileId} from stream ${streamId}`);
+      
+      const streams = await db.getStreams();
+      const stream = streams.find(s => s.id === streamId);
+      if (!stream) {
+        console.error(`[Streaming Engine] Stream ${streamId} not found`);
+        return res.status(404).json({ error: 'Stream not found' });
+      }
+
+      let profiles: any[] = [];
+      try {
+        profiles = JSON.parse(stream.profilesJson || '[]');
+      } catch (e) {
+        console.error(`[Streaming Engine] Failed to parse profiles for stream ${streamId}`, e);
+      }
+
+      if (!Array.isArray(profiles)) {
+        profiles = [];
+      }
+
+      const originalCount = profiles.length;
+      profiles = profiles.filter(p => p.id !== profileId);
+
+      if (profiles.length === originalCount) {
+        console.error(`[Streaming Engine] Profile ${profileId} not found in stream ${streamId}`);
+        return res.status(404).json({ error: 'Output profile not found' });
+      }
+
+      // Update the database
+      const updatedProfilesJson = JSON.stringify(profiles);
+      const updatedStream = await db.updateStream(streamId, { profilesJson: updatedProfilesJson });
+
+      if (!updatedStream) {
+        console.error(`[Streaming Engine] Failed to update stream ${streamId} with deleted profile`);
+        return res.status(500).json({ error: 'Failed to persist profile deletion' });
+      }
+
+      // If stream is live, restart its FFmpeg transcode pipeline with the updated profiles list
+      if (updatedStream.status === 'live') {
+        console.log(`[Streaming Engine] Stream ${streamId} is active. Restarting FFmpeg transcoder for streamKey: ${updatedStream.streamKey}`);
+        await stopStreamIngestAndHls(updatedStream.streamKey);
+        await startFfMpegTranscoder(updatedStream.streamKey);
+      }
+
+      res.status(200).json({ 
+        message: 'Profile deleted successfully',
+        stream: updatedStream,
+        profiles
+      });
+    } catch (err) {
+      console.error(`[Streaming Engine] Error deleting profile:`, err);
+      res.status(500).json({ error: 'Internal server error while deleting profile' });
     }
   });
 
@@ -1099,6 +1404,692 @@ segment3.ts
   });
 
   // ----------------------------------------------------
+  // RASPBERRY PI DEVICE MANAGEMENT & PAIRING ENDPOINTS
+  // ----------------------------------------------------
+
+  const deviceConnections = new Map<string, any>(); // deviceId -> WebSocket
+  const dashboardConnections = new Set<any>(); // WebSockets for dashboards
+
+  function broadcastToDashboards(message: any) {
+    const payload = JSON.stringify(message);
+    for (const ws of dashboardConnections) {
+      if (ws.readyState === 1 /* OPEN */) {
+        ws.send(payload);
+      }
+    }
+  }
+
+  // GET all devices
+  app.get('/api/devices', authenticateToken, async (req, res) => {
+    try {
+      const devices = await db.getDevices();
+      res.json(devices);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to retrieve devices' });
+    }
+  });
+
+  // GET single device
+  app.get('/api/devices/:id', authenticateToken, async (req, res) => {
+    try {
+      const device = await db.getDevice(req.params.id);
+      if (!device) return res.status(404).json({ error: 'Device not found' });
+      res.json(device);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to retrieve device' });
+    }
+  });
+
+  // CREATE / pre-register device manually
+  app.post('/api/devices', authenticateToken, async (req, res) => {
+    try {
+      const { name, location, description } = req.body;
+      if (!name) return res.status(400).json({ error: 'Device name is required' });
+
+      // Generate a pairing code for manual pairing
+      const pairingCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const newDevice = await db.createDevice({
+        name,
+        location,
+        description,
+        online_status: 'offline',
+        current_volume: 100,
+        paired: false,
+        pairing_code: pairingCode
+      });
+      res.status(201).json(newDevice);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to create device' });
+    }
+  });
+
+  // UPDATE device metadata (name, location, description)
+  app.put('/api/devices/:id', authenticateToken, async (req, res) => {
+    try {
+      const { name, location, description } = req.body;
+      const deviceId = req.params.id;
+      const device = await db.getDevice(deviceId);
+      if (!device) return res.status(404).json({ error: 'Device not found' });
+
+      const updates: Partial<any> = {};
+      if (name !== undefined) updates.name = name;
+      if (location !== undefined) updates.location = location;
+      if (description !== undefined) updates.description = description;
+
+      const updated = await db.updateDevice(deviceId, updates);
+      res.json(updated);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to update device details' });
+    }
+  });
+
+  // DELETE device
+  app.delete('/api/devices/:id', authenticateToken, async (req, res) => {
+    try {
+      const deleted = await db.deleteDevice(req.params.id);
+      if (!deleted) return res.status(404).json({ error: 'Device not found' });
+      
+      // Close any active WebSocket connection
+      const ws = deviceConnections.get(req.params.id);
+      if (ws) {
+        ws.close(4000, 'Device deleted');
+        deviceConnections.delete(req.params.id);
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to delete device' });
+    }
+  });
+
+  // PAIR a device from the Dashboard
+  app.post('/api/devices/pair', authenticateToken, async (req, res) => {
+    try {
+      const { pairingCode, name, location, description } = req.body;
+      if (!pairingCode) return res.status(400).json({ error: 'Pairing code is required' });
+
+      const device = await db.getDeviceByPairingCode(pairingCode.toUpperCase());
+      if (!device) {
+        return res.status(404).json({ error: 'Invalid pairing code. Device not found.' });
+      }
+
+      if (device.paired) {
+        return res.status(400).json({ error: 'Device is already paired.' });
+      }
+
+      const deviceToken = 'token_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      const updated = await db.updateDevice(device.id, {
+        name: name || device.name,
+        location: location || device.location,
+        description: description || device.description,
+        paired: true,
+        pairing_code: null, // Clear pairing code once paired
+        token: deviceToken,
+        online_status: 'online',
+        last_seen: new Date().toISOString()
+      });
+
+      // Notify the active WebSocket if it's waiting
+      const ws = deviceConnections.get(device.id);
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: 'paired',
+          token: deviceToken,
+          device: updated
+        }));
+      }
+
+      broadcastToDashboards({ type: 'device_paired', deviceId: device.id, device: updated });
+      await db.addDeviceLog(device.id, 'info', `Device successfully paired as "${updated?.name}"`);
+
+      res.json({ success: true, device: updated });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to pair device' });
+    }
+  });
+
+  // SEND REMOTE COMMAND TO DEVICE
+  app.post('/api/devices/:id/command', authenticateToken, async (req, res) => {
+    try {
+      const { command, args } = req.body;
+      if (!command) return res.status(400).json({ error: 'Command is required' });
+
+      const device = await db.getDevice(req.params.id);
+      if (!device) return res.status(404).json({ error: 'Device not found' });
+
+      const ws = deviceConnections.get(req.params.id);
+      
+      // Update database attributes for immediate feedback
+      const updates: Partial<any> = {};
+      if (command === 'play') {
+        updates.current_stream_id = args?.streamId || null;
+        updates.current_stream_url = args?.streamUrl || null;
+        updates.online_status = 'playing';
+      } else if (command === 'stop') {
+        updates.online_status = 'stopped';
+      } else if (command === 'pause') {
+        updates.online_status = 'stopped';
+      } else if (command === 'resume') {
+        updates.online_status = 'playing';
+      } else if (command === 'volume') {
+        updates.current_volume = typeof args?.volume === 'number' ? args.volume : device.current_volume;
+      }
+
+      await db.updateDevice(device.id, updates);
+
+      // Log action
+      await db.addDeviceLog(device.id, 'info', `Admin sent command: ${command.toUpperCase()} ${args ? JSON.stringify(args) : ''}`);
+      await db.addPlaybackHistory({
+        device_id: device.id,
+        action: command,
+        stream_id: args?.streamId,
+        stream_url: args?.streamUrl
+      });
+
+      if (!ws || ws.readyState !== 1) {
+        // Device is offline or disconnected, we still save state in DB, but notify dashboard of sync lag
+        return res.json({ success: true, warning: 'Device is currently offline. Command cached in DB state.' });
+      }
+
+      // Send command over real-time WebSocket
+      ws.send(JSON.stringify({
+        type: 'command',
+        command,
+        args
+      }));
+
+      // Broadcast changes to all dashboards
+      broadcastToDashboards({
+        type: 'device_command_sent',
+        deviceId: device.id,
+        command,
+        args,
+        deviceState: { ...device, ...updates }
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to send remote command' });
+    }
+  });
+
+  // UPDATE REMOTE CONFIGURATION
+  app.post('/api/devices/:id/config', authenticateToken, async (req, res) => {
+    try {
+      const { brightness, rotation, current_resolution, current_volume, network_settings, player_settings } = req.body;
+      const deviceId = req.params.id;
+      const device = await db.getDevice(deviceId);
+      if (!device) return res.status(404).json({ error: 'Device not found' });
+
+      const updates: Partial<any> = {};
+      if (typeof brightness === 'number') updates.brightness = brightness;
+      if (rotation !== undefined) updates.rotation = rotation;
+      if (current_resolution !== undefined) updates.current_resolution = current_resolution;
+      if (typeof current_volume === 'number') updates.current_volume = current_volume;
+      if (network_settings !== undefined) updates.network_settings = typeof network_settings === 'object' ? JSON.stringify(network_settings) : network_settings;
+      if (player_settings !== undefined) updates.player_settings = typeof player_settings === 'object' ? JSON.stringify(player_settings) : player_settings;
+
+      const updated = await db.updateDevice(deviceId, updates);
+
+      // Log config change
+      await db.addDeviceLog(deviceId, 'info', `Device configuration updated: ${JSON.stringify(updates)}`);
+
+      // Dispatch real-time WebSocket config payload if device is connected
+      const ws = deviceConnections.get(deviceId);
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: 'configure',
+          config: {
+            brightness,
+            rotation,
+            resolution: current_resolution,
+            volume: current_volume,
+            network_settings,
+            player_settings
+          }
+        }));
+      }
+
+      broadcastToDashboards({
+        type: 'device_config_updated',
+        deviceId,
+        device: updated
+      });
+
+      res.json({ success: true, device: updated });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to update remote configuration' });
+    }
+  });
+
+  // TRIGGER REMOTE OTA UPDATE
+  app.post('/api/devices/:id/ota-update', authenticateToken, async (req, res) => {
+    try {
+      const { targetVersion, updateUrl } = req.body;
+      const deviceId = req.params.id;
+      const device = await db.getDevice(deviceId);
+      if (!device) return res.status(404).json({ error: 'Device not found' });
+
+      // Update client version database state
+      const target = targetVersion || '1.1.0';
+      await db.updateDevice(deviceId, { client_version: target });
+
+      await db.addDeviceLog(deviceId, 'info', `Dispatched Remote OTA update command to upgrade to version ${target}`);
+
+      // Dispatch update command over real-time WS
+      const ws = deviceConnections.get(deviceId);
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: 'ota_update',
+          version: target,
+          url: updateUrl || ''
+        }));
+      }
+
+      broadcastToDashboards({
+        type: 'device_ota_triggered',
+        deviceId,
+        version: target
+      });
+
+      res.json({ success: true, targetVersion: target });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to dispatch OTA update' });
+    }
+  });
+
+  // GET logs for a device
+  app.get('/api/devices/:id/logs', authenticateToken, async (req, res) => {
+    try {
+      const logs = await db.getDeviceLogs(req.params.id);
+      res.json(logs);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to retrieve logs' });
+    }
+  });
+
+  // GET playback history for a device
+  app.get('/api/devices/:id/history', authenticateToken, async (req, res) => {
+    try {
+      const history = await db.getPlaybackHistory(req.params.id);
+      res.json(history);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to retrieve playback history' });
+    }
+  });
+
+  // SERVE screenshot for a device
+  app.get('/api/devices/:id/screenshot', async (req, res) => {
+    const screenshotPath = path.resolve(`./data/screenshots/${req.params.id}.jpg`);
+    if (fs.existsSync(screenshotPath)) {
+      res.sendFile(screenshotPath);
+    } else {
+      // Return beautiful "No Signal" placeholder svg
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.send(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+          <rect width="640" height="360" fill="#0f172a"/>
+          <text x="50%" y="45%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#64748b" font-weight="bold">NO SIGNAL</text>
+          <text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#475569">No screenshot uploaded from receiver yet</text>
+        </svg>
+      `);
+    }
+  });
+
+  // --- DEVICE GROUPS ---
+  app.get('/api/device-groups', authenticateToken, async (req, res) => {
+    try {
+      const groups = await db.getDeviceGroups();
+      const enrichedGroups = await Promise.all(groups.map(async (g) => {
+        const devices = await db.getGroupDevices(g.id);
+        return { ...g, devices };
+      }));
+      res.json(enrichedGroups);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to retrieve device groups' });
+    }
+  });
+
+  app.post('/api/device-groups', authenticateToken, async (req, res) => {
+    try {
+      const { name, description } = req.body;
+      if (!name) return res.status(400).json({ error: 'Group name is required' });
+      const group = await db.createDeviceGroup({ name, description });
+      res.status(201).json(group);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to create group' });
+    }
+  });
+
+  app.put('/api/device-groups/:id', authenticateToken, async (req, res) => {
+    try {
+      const group = await db.updateDeviceGroup(req.params.id, req.body);
+      if (!group) return res.status(404).json({ error: 'Group not found' });
+      res.json(group);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to update group' });
+    }
+  });
+
+  app.delete('/api/device-groups/:id', authenticateToken, async (req, res) => {
+    try {
+      await db.deleteDeviceGroup(req.params.id);
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to delete group' });
+    }
+  });
+
+  app.post('/api/device-groups/:id/members', authenticateToken, async (req, res) => {
+    try {
+      const { deviceId } = req.body;
+      if (!deviceId) return res.status(400).json({ error: 'Device ID is required' });
+      await db.addDeviceToGroup(req.params.id, deviceId);
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to add device to group' });
+    }
+  });
+
+  app.delete('/api/device-groups/:id/members/:deviceId', authenticateToken, async (req, res) => {
+    try {
+      await db.removeDeviceFromGroup(req.params.id, req.params.deviceId);
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to remove device from group' });
+    }
+  });
+
+  // GROUP COMMAND
+  app.post('/api/device-groups/:id/command', authenticateToken, async (req, res) => {
+    try {
+      const { command, args } = req.body;
+      if (!command) return res.status(400).json({ error: 'Command is required' });
+
+      const devices = await db.getGroupDevices(req.params.id);
+      const results: any[] = [];
+
+      for (const device of devices) {
+        const ws = deviceConnections.get(device.id);
+        const updates: Partial<any> = {};
+        if (command === 'play') {
+          updates.current_stream_id = args?.streamId || null;
+          updates.current_stream_url = args?.streamUrl || null;
+          updates.online_status = 'playing';
+        } else if (command === 'stop') {
+          updates.online_status = 'stopped';
+        } else if (command === 'pause') {
+          updates.online_status = 'stopped';
+        } else if (command === 'resume') {
+          updates.online_status = 'playing';
+        } else if (command === 'volume') {
+          updates.current_volume = typeof args?.volume === 'number' ? args.volume : device.current_volume;
+        }
+
+        await db.updateDevice(device.id, updates);
+        await db.addDeviceLog(device.id, 'info', `Group command [${command.toUpperCase()}] broadcasted.`);
+        await db.addPlaybackHistory({
+          device_id: device.id,
+          action: `group_cmd_${command}`,
+          stream_id: args?.streamId,
+          stream_url: args?.streamUrl
+        });
+
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'command', command, args }));
+          results.push({ deviceId: device.id, status: 'success' });
+        } else {
+          results.push({ deviceId: device.id, status: 'offline_cached' });
+        }
+      }
+
+      broadcastToDashboards({ type: 'group_command_sent', groupId: req.params.id, command, args });
+      res.json({ success: true, results });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to execute group command' });
+    }
+  });
+
+  // --- DEVICE SCHEDULES ---
+  app.get('/api/devices/schedules', authenticateToken, async (req, res) => {
+    try {
+      const schedules = await db.getDeviceSchedules();
+      res.json(schedules);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to fetch schedules' });
+    }
+  });
+
+  app.post('/api/devices/schedules', authenticateToken, async (req, res) => {
+    try {
+      const { device_id, group_id, time, action, stream_id, stream_url } = req.body;
+      if (!time || !action) {
+        return res.status(400).json({ error: 'Time and action are required' });
+      }
+      const sched = await db.createDeviceSchedule({
+        device_id,
+        group_id,
+        time,
+        action,
+        stream_id,
+        stream_url,
+        enabled: true
+      });
+      res.status(201).json(sched);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to create schedule' });
+    }
+  });
+
+  app.delete('/api/devices/schedules/:id', authenticateToken, async (req, res) => {
+    try {
+      await db.deleteDeviceSchedule(req.params.id);
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to delete schedule' });
+    }
+  });
+
+  // ----------------------------------------------------
+  // PUBLIC DEVICE-SIDE NATIVE AGENT ENDPOINTS
+  // ----------------------------------------------------
+
+  // Public endpoint for Raspberry Pi self-registration on bootup
+  app.post('/api/devices/register', async (req, res) => {
+    try {
+      const { deviceId, name, mac_address, os_version, player_version, ip_address } = req.body;
+      if (!name) return res.status(400).json({ error: 'Device name is required' });
+
+      // Check if device is already registered by ID or Mac
+      let device = null;
+      if (deviceId) {
+        device = await db.getDevice(deviceId);
+      }
+      if (!device && mac_address) {
+        const devices = await db.getDevices();
+        device = devices.find(d => d.mac_address === mac_address) || null;
+      }
+
+      if (device) {
+        // Update diagnostics
+        device = await db.updateDevice(device.id, {
+          os_version: os_version || device.os_version,
+          player_version: player_version || device.player_version,
+          ip_address: ip_address || device.ip_address,
+          mac_address: mac_address || device.mac_address,
+          last_seen: new Date().toISOString()
+        });
+
+        if (device.paired) {
+          return res.json({ paired: true, token: device.token, deviceId: device.id, device });
+        } else {
+          return res.json({ paired: false, pairingCode: device.pairing_code, deviceId: device.id });
+        }
+      }
+
+      // Create pre-paired or waiting device
+      const pairingCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const newDevice = await db.createDevice({
+        name,
+        os_version,
+        player_version,
+        ip_address,
+        mac_address,
+        online_status: 'offline',
+        current_volume: 100,
+        paired: false,
+        pairing_code: pairingCode
+      });
+
+      await db.addDeviceLog(newDevice.id, 'info', `Device initialized first boot. Awaiting pairing with code: ${pairingCode}`);
+
+      res.json({ paired: false, pairingCode, deviceId: newDevice.id });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Device registration failed' });
+    }
+  });
+
+  // HTTP-based backup heartbeat endpoint (Websockets are preferred)
+  app.post('/api/devices/heartbeat', async (req, res) => {
+    try {
+      const { token, cpu_usage, ram_usage, temperature, network_speed, online_status, current_playback_status, screenshot } = req.body;
+      if (!token) return res.status(401).json({ error: 'Auth token required' });
+
+      const device = await db.getDeviceByToken(token);
+      if (!device) return res.status(403).json({ error: 'Invalid device token' });
+
+      const updates: Partial<any> = {
+        cpu_usage: cpu_usage || 0,
+        ram_usage: ram_usage || 0,
+        temperature: temperature || 0,
+        network_speed: network_speed || '0 Mbps',
+        online_status: online_status || 'online',
+        current_playback_status: current_playback_status || 'idle',
+        last_seen: new Date().toISOString()
+      };
+
+      if (screenshot) {
+        const base64Data = screenshot.replace(/^data:image\/\w+;base64,/, "");
+        const screenshotDir = path.resolve('./data/screenshots');
+        if (!fs.existsSync(screenshotDir)) {
+          fs.mkdirSync(screenshotDir, { recursive: true });
+        }
+        const screenshotPath = path.join(screenshotDir, `${device.id}.jpg`);
+        fs.writeFileSync(screenshotPath, Buffer.from(base64Data, 'base64'));
+        updates.screenshot_url = `/api/devices/${device.id}/screenshot`;
+        updates.screenshot_time = new Date().toISOString();
+      }
+
+      const updated = await db.updateDevice(device.id, updates);
+      broadcastToDashboards({ type: 'device_heartbeat', deviceId: device.id, stats: updated });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Heartbeat processing failed' });
+    }
+  });
+
+  // --- SCHEDULES CHECKER BACKGROUND TASK ---
+  setInterval(async () => {
+    try {
+      const now = new Date();
+      const currentHours = String(now.getHours()).padStart(2, '0');
+      const currentMinutes = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeStr = `${currentHours}:${currentMinutes}`; // e.g., "09:00"
+
+      const schedules = await db.getDeviceSchedules();
+      for (const sched of schedules) {
+        if (sched.time === currentTimeStr) {
+          console.log(`[Scheduler] Triggering schedule ${sched.id} at ${sched.time}`);
+          if (sched.device_id) {
+            const ws = deviceConnections.get(sched.device_id);
+            const updates = {
+              current_stream_id: sched.stream_id || null,
+              current_stream_url: sched.stream_url || null,
+              online_status: sched.action === 'play' ? 'playing' : 'stopped'
+            } as any;
+
+            await db.updateDevice(sched.device_id, updates);
+            await db.addDeviceLog(sched.device_id, 'info', `[Scheduler] Auto-triggered scheduled action: ${sched.action.toUpperCase()}`);
+            await db.addPlaybackHistory({
+              device_id: sched.device_id,
+              action: `schedule_${sched.action}`,
+              stream_id: sched.stream_id,
+              stream_url: sched.stream_url
+            });
+
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({
+                type: 'command',
+                command: sched.action,
+                args: {
+                  streamId: sched.stream_id,
+                  streamUrl: sched.stream_url
+                }
+              }));
+            }
+          } else if (sched.group_id) {
+            const devices = await db.getGroupDevices(sched.group_id);
+            for (const d of devices) {
+              const ws = deviceConnections.get(d.id);
+              const updates = {
+                current_stream_id: sched.stream_id || null,
+                current_stream_url: sched.stream_url || null,
+                online_status: sched.action === 'play' ? 'playing' : 'stopped'
+              } as any;
+
+              await db.updateDevice(d.id, updates);
+              await db.addDeviceLog(d.id, 'info', `[Scheduler Group] Auto-triggered scheduled action: ${sched.action.toUpperCase()}`);
+              await db.addPlaybackHistory({
+                device_id: d.id,
+                action: `schedule_group_${sched.action}`,
+                stream_id: sched.stream_id,
+                stream_url: sched.stream_url
+              });
+
+              if (ws && ws.readyState === 1) {
+                ws.send(JSON.stringify({
+                  type: 'command',
+                  command: sched.action,
+                  args: {
+                    streamId: sched.stream_id,
+                    streamUrl: sched.stream_url
+                  }
+                }));
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Scheduler] Error running schedules:', err);
+    }
+  }, 60000); // Check every minute
+
+  // ----------------------------------------------------
   // VITE DEV SERVER VS PRODUCTION SERVING
   // ----------------------------------------------------
   if (process.env.NODE_ENV !== 'production') {
@@ -1115,7 +2106,137 @@ segment3.ts
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  // WRAP EXPRESS APP IN HTTP SERVER FOR WEBSOCKET SUPPORT
+  const httpServer = createServer(app);
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
+
+    if (pathname === '/api/device-ws' || pathname === '/api/dashboard-ws') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+
+  wss.on('connection', async (ws: any, request: any) => {
+    const urlObj = new URL(request.url || '', `http://${request.headers.host}`);
+    const token = urlObj.searchParams.get('token');
+    const pathname = urlObj.pathname;
+
+    if (pathname === '/api/dashboard-ws') {
+      dashboardConnections.add(ws);
+      console.log('[WS] Dashboard client connected');
+      ws.on('close', () => {
+        dashboardConnections.delete(ws);
+        console.log('[WS] Dashboard client disconnected');
+      });
+    } else if (pathname === '/api/device-ws') {
+      if (!token) {
+        ws.close(4001, 'Token required');
+        return;
+      }
+      const device = await db.getDeviceByToken(token);
+      if (!device) {
+        ws.close(4002, 'Invalid token');
+        return;
+      }
+
+      const deviceId = device.id;
+      deviceConnections.set(deviceId, ws);
+      console.log(`[WS] Raspberry Pi connected: ${device.name} (ID: ${deviceId})`);
+
+      await db.updateDevice(deviceId, { 
+        online_status: 'online', 
+        last_seen: new Date().toISOString() 
+      });
+      await db.addDeviceLog(deviceId, 'info', 'Connected to StreamPulse VPS over real-time WebSocket connection.');
+      broadcastToDashboards({ type: 'device_status', deviceId, status: 'online' });
+
+      ws.on('message', async (data: any) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'heartbeat') {
+            const updates: any = {
+              cpu_usage: typeof msg.cpu_usage === 'number' ? msg.cpu_usage : 0,
+              ram_usage: typeof msg.ram_usage === 'number' ? msg.ram_usage : 0,
+              temperature: typeof msg.temperature === 'number' ? msg.temperature : 0,
+              network_speed: msg.network_speed || '0 Mbps',
+              online_status: msg.online_status || 'online',
+              current_playback_status: msg.current_playback_status || 'idle',
+              current_stream_id: msg.current_stream_id || null,
+              current_stream_url: msg.current_stream_url || null,
+              current_resolution: msg.current_resolution || null,
+              current_volume: typeof msg.current_volume === 'number' ? msg.current_volume : 100,
+              last_seen: new Date().toISOString()
+            };
+
+            if (msg.screenshot) {
+              const base64Data = msg.screenshot.replace(/^data:image\/\w+;base64,/, "");
+              const screenshotDir = path.resolve('./data/screenshots');
+              if (!fs.existsSync(screenshotDir)) {
+                fs.mkdirSync(screenshotDir, { recursive: true });
+              }
+              const screenshotPath = path.join(screenshotDir, `${deviceId}.jpg`);
+              fs.writeFileSync(screenshotPath, Buffer.from(base64Data, 'base64'));
+              updates.screenshot_url = `/api/devices/${deviceId}/screenshot`;
+              updates.screenshot_time = new Date().toISOString();
+            }
+
+            const updated = await db.updateDevice(deviceId, updates);
+            broadcastToDashboards({ 
+              type: 'device_heartbeat', 
+              deviceId, 
+              stats: updated
+            });
+          } else if (msg.type === 'log') {
+            await db.addDeviceLog(deviceId, msg.level || 'info', msg.message);
+            broadcastToDashboards({
+              type: 'device_log',
+              deviceId,
+              log: { level: msg.level, message: msg.message, timestamp: new Date().toISOString() }
+            });
+          } else if (msg.type === 'playback_state') {
+            const status = msg.status; // e.g. playing, stopped, buffering, error
+            await db.updateDevice(deviceId, {
+              online_status: status === 'playing' ? 'playing' : status === 'buffering' ? 'buffering' : 'stopped',
+              current_playback_status: status
+            });
+            await db.addPlaybackHistory({
+              device_id: deviceId,
+              action: status,
+              stream_id: msg.streamId,
+              stream_url: msg.streamUrl
+            });
+            await db.addDeviceLog(deviceId, 'info', `Device changed playback status to: ${status.toUpperCase()}`);
+            
+            broadcastToDashboards({
+              type: 'device_playback_state',
+              deviceId,
+              status,
+              streamId: msg.streamId,
+              streamUrl: msg.streamUrl
+            });
+          }
+        } catch (e) {
+          console.error('[WS] Error processing message from device:', e);
+        }
+      });
+
+      ws.on('close', async () => {
+        deviceConnections.delete(deviceId);
+        console.log(`[WS] Raspberry Pi disconnected: ${device.name}`);
+        await db.updateDevice(deviceId, { online_status: 'offline' });
+        await db.addDeviceLog(deviceId, 'warn', 'Connection to StreamPulse VPS was closed.');
+        broadcastToDashboards({ type: 'device_status', deviceId, status: 'offline' });
+      });
+    }
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`StreamPulse VPS Core listening on http://localhost:${PORT}`);
   });
 }
