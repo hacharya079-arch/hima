@@ -24,6 +24,23 @@ export interface StreamSession {
   profile?: string;
   pixelFormat?: string;
   enabledProfiles?: string;
+  gopSize?: number;
+  bufferSize?: number;
+  maxBitrate?: number;
+  scalingAlgorithm?: string;
+  audioEnabled?: boolean;
+  audioBitrate?: string;
+  audioSampleRate?: number;
+  audioChannels?: string;
+  audioVolume?: number;
+  audioNormalize?: boolean;
+  audioNoiseReduction?: boolean;
+  audioDelay?: number;
+  audioLanguage?: string;
+  audioTrackSelection?: string;
+  audioPassthrough?: boolean;
+  audioTranscoding?: boolean;
+  profilesJson?: string;
 }
 
 export interface StreamStats {

@@ -66,6 +66,37 @@ interface StreamPlayerProps {
   isAdmin?: boolean;
 }
 
+const getResolutionPreset = (resolution: string) => {
+  const defaults: Record<string, { width: number; height: number; fps: number; videoBitrate: string; audioBitrate: string; aspectRatio: string; videoCodec: string; audioCodec: string; preset: string; profile: string; pixelFormat: string }> = {
+    'Source (Original)': { width: 1920, height: 1080, fps: 30, videoBitrate: '6000k', audioBitrate: '128k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '4K': { width: 3840, height: 2160, fps: 60, videoBitrate: '12000k', audioBitrate: '256k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '2K': { width: 2560, height: 1440, fps: 60, videoBitrate: '8000k', audioBitrate: '192k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '1080p': { width: 1920, height: 1080, fps: 30, videoBitrate: '5000k', audioBitrate: '128k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '900p': { width: 1600, height: 900, fps: 30, videoBitrate: '4000k', audioBitrate: '128k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '720p': { width: 1280, height: 720, fps: 30, videoBitrate: '2500k', audioBitrate: '128k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '576p': { width: 1024, height: 576, fps: 30, videoBitrate: '1800k', audioBitrate: '96k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '480p': { width: 854, height: 480, fps: 30, videoBitrate: '1200k', audioBitrate: '96k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '360p': { width: 640, height: 360, fps: 30, videoBitrate: '800k', audioBitrate: '64k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    '240p': { width: 426, height: 240, fps: 30, videoBitrate: '400k', audioBitrate: '64k', aspectRatio: '16:9', videoCodec: 'libx264', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+    'Audio Only': { width: 0, height: 0, fps: 0, videoBitrate: '0k', audioBitrate: '128k', aspectRatio: 'none', videoCodec: 'none', audioCodec: 'aac', preset: 'veryfast', profile: 'main', pixelFormat: 'yuv420p' },
+  };
+
+  let lookupKey = resolution;
+  if (resolution.includes('4K') || resolution === '4K (3840×2160)') lookupKey = '4K';
+  else if (resolution.includes('2K') || resolution === '2K (2560×1440)') lookupKey = '2K';
+  else if (resolution.includes('1080p') || resolution === '1080p (1920×1080)') lookupKey = '1080p';
+  else if (resolution.includes('900p') || resolution === '900p (1600×900)') lookupKey = '900p';
+  else if (resolution.includes('720p') || resolution === '720p (1280×720)') lookupKey = '720p';
+  else if (resolution.includes('576p') || resolution === '576p (1024×576)') lookupKey = '576p';
+  else if (resolution.includes('480p') || resolution === '480p (854×480)') lookupKey = '480p';
+  else if (resolution.includes('360p') || resolution === '360p (640×360)') lookupKey = '360p';
+  else if (resolution.includes('240p') || resolution === '240p (426×240)') lookupKey = '240p';
+  else if (resolution.includes('Audio Only')) lookupKey = 'Audio Only';
+  else if (resolution.includes('Source')) lookupKey = 'Source (Original)';
+
+  return defaults[lookupKey] || defaults['1080p'];
+};
+
 const StreamPlayer: React.FC<StreamPlayerProps> = ({ 
   stream, 
   onRemove, 
@@ -79,7 +110,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
   onDisable,
   onEdit,
   onCloneProfile,
-  isAdmin
+  isAdmin = true
 }) => {
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -1395,7 +1426,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2">
-               {onRemove && (
+               {isAdmin && onRemove && (
                  <button 
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1450,7 +1481,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
         {/* Resolution Badge */}
         <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md rounded text-[9px] sm:text-[10px] font-bold text-zinc-300 flex items-center border border-white/10 overflow-hidden">
-          {onUpdateResolution ? (
+          {isAdmin && onUpdateResolution ? (
             <div className="relative group/res flex items-center px-2 py-0.5 sm:py-1 hover:bg-white/10 transition-colors cursor-pointer">
               <Monitor className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-blue-400 mr-1 sm:mr-1.5" />
               <span>{stream.resolution}</span>
@@ -1545,21 +1576,23 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
               </div>
             )}
             
-            <div className="flex items-center gap-1.5">
-              <button 
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                className={`p-1 sm:p-1.5 rounded transition-all border ${showAdvanced ? 'bg-blue-500/10 border-blue-500/50 text-blue-500' : 'bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300'}`}
-              >
-                <Sliders className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              </button>
-              <button 
-                onClick={() => setIsEncrypted(!isEncrypted)}
-                className={`flex items-center gap-1 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-[8px] sm:text-[9px] font-bold transition-all border ${isEncrypted ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-500' : 'bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300'}`}
-              >
-                {isEncrypted ? <ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> : <ShieldAlert className="w-2.5 h-2.5 sm:w-3 sm:h-3 opacity-50" />}
-                <span className="hidden xs:inline">{isEncrypted ? "SECURE" : "UNSEC"}</span>
-              </button>
-            </div>
+            {isAdmin && (
+              <div className="flex items-center gap-1.5">
+                <button 
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className={`p-1 sm:p-1.5 rounded transition-all border ${showAdvanced ? 'bg-blue-500/10 border-blue-500/50 text-blue-500' : 'bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  <Sliders className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                </button>
+                <button 
+                  onClick={() => setIsEncrypted(!isEncrypted)}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-[8px] sm:text-[9px] font-bold transition-all border ${isEncrypted ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-500' : 'bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  {isEncrypted ? <ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> : <ShieldAlert className="w-2.5 h-2.5 sm:w-3 sm:h-3 opacity-50" />}
+                  <span className="hidden xs:inline">{isEncrypted ? "SECURE" : "UNSEC"}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2054,7 +2087,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
                                 <button onClick={() => copyToClipboard(stream.streamKey, 'key')} className="text-zinc-500 hover:text-white p-1" title="Copy Key">
                                   {copiedKey ? <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-500" /> : <Copy className="w-3 h-3 sm:w-3.5 sm:h-3.5" />}
                                 </button>
-                                {onRegenerateKey && (
+                                {isAdmin && onRegenerateKey && (
                                   <button onClick={() => setIsConfirmingRegen(true)} className="text-zinc-500 hover:text-amber-500 p-1 transition-colors" title="Regenerate Key">
                                     <RefreshCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                   </button>
@@ -2069,15 +2102,215 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
             ) : (
               <div className="space-y-3 animate-in fade-in slide-in-from-right-2 duration-300 max-h-[450px] overflow-y-auto pr-1 no-scrollbar">
                 {/* Resolution Management Panel */}
-                <div className="bg-zinc-950/80 rounded-xl p-3 border border-zinc-800/80 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Monitor className="w-3.5 h-3.5" /> Stream Encoder Dashboard
-                    </h4>
-                    <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono font-bold uppercase">Pro Transcoder</span>
-                  </div>
+                {isAdmin && (
+                  <div className="bg-zinc-950/80 rounded-xl p-3 border border-zinc-800/80 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Monitor className="w-3.5 h-3.5" /> Stream Encoder Dashboard
+                      </h4>
+                      <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono font-bold uppercase">Pro Transcoder</span>
+                    </div>
 
-                  {/* Resolution Profile Manager (Collapsible) */}
+                    {/* Resolution Target and Custom Fields Section */}
+                    <div className="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/60 space-y-3">
+                      <div className="grid grid-cols-2 gap-3 items-center">
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider block">Resolution Target</label>
+                          <select
+                            value={selectedResolution}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSelectedResolution(val);
+                              // Automatically set matching defaults for built-in resolutions if selected
+                              if (val !== 'Custom Resolution') {
+                                const preset = getResolutionPreset(val);
+                                setCustomWidth(preset.width);
+                                setCustomHeight(preset.height);
+                                setCustomFps(preset.fps);
+                                setCustomBitrate(parseInt(preset.videoBitrate) || 2500);
+                                setCustomAudioBitrate(parseInt(preset.audioBitrate) || 128);
+                                setCustomAspectRatio(preset.aspectRatio);
+                                setCustomVideoCodec(preset.videoCodec === 'libx264' ? 'H.264' : preset.videoCodec === 'libx265' ? 'H.265' : preset.videoCodec === 'libsvtav1' ? 'AV1' : 'H.264');
+                                setCustomAudioCodec(preset.audioCodec);
+                                setCustomPreset(preset.preset);
+                                setCustomProfile(preset.profile);
+                                setCustomPixelFormat(preset.pixelFormat);
+                              }
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                          >
+                            <option value="Source (Original)">Source (Original)</option>
+                            <option value="4K (3840×2160)">4K (3840×2160)</option>
+                            <option value="2K (2560×1440)">2K (2560×1440)</option>
+                            <option value="1080p (1920×1080)">1080p (1920×1080)</option>
+                            <option value="900p (1600×900)">900p (1600×900)</option>
+                            <option value="720p (1280×720)">720p (1280×720)</option>
+                            <option value="576p (1024×576)">576p (1024×576)</option>
+                            <option value="480p (854×480)">480p (854×480)</option>
+                            <option value="360p (640×360)">360p (640×360)</option>
+                            <option value="240p (426×240)">240p (426×240)</option>
+                            <option value="Audio Only">Audio Only</option>
+                            <option value="Custom Resolution">Custom Resolution</option>
+                          </select>
+                        </div>
+                        <div className="text-[10px] text-zinc-500 leading-tight">
+                          Select the target output resolution for this stream's transcode pipeline. Customizing properties requires choosing <span className="text-blue-400">Custom Resolution</span>.
+                        </div>
+                      </div>
+
+                      {/* Custom Resolution Fields - Shown only when 'Custom Resolution' is selected */}
+                      {selectedResolution === 'Custom Resolution' && (
+                        <div className="space-y-3 pt-3 border-t border-zinc-800/60 animate-in fade-in duration-300">
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Width</label>
+                              <input
+                                type="number"
+                                value={customWidth}
+                                onChange={(e) => setCustomWidth(Number(e.target.value))}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Height</label>
+                              <input
+                                type="number"
+                                value={customHeight}
+                                onChange={(e) => setCustomHeight(Number(e.target.value))}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Frame Rate (FPS)</label>
+                              <input
+                                type="number"
+                                value={customFps}
+                                onChange={(e) => setCustomFps(Number(e.target.value))}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Video Bitrate (kbps)</label>
+                              <input
+                                type="number"
+                                value={customBitrate}
+                                onChange={(e) => setCustomBitrate(Number(e.target.value))}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Audio Bitrate (kbps)</label>
+                              <input
+                                type="number"
+                                value={customAudioBitrate}
+                                onChange={(e) => setCustomAudioBitrate(Number(e.target.value))}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Aspect Ratio</label>
+                              <input
+                                type="text"
+                                value={customAspectRatio}
+                                onChange={(e) => setCustomAspectRatio(e.target.value)}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-blue-500"
+                                placeholder="16:9"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Video Codec</label>
+                              <select
+                                value={customVideoCodec}
+                                onChange={(e) => setCustomVideoCodec(e.target.value)}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                              >
+                                <option value="H.264">H.264</option>
+                                <option value="H.265">H.265</option>
+                                <option value="AV1">AV1</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Audio Codec</label>
+                              <select
+                                value={customAudioCodec}
+                                onChange={(e) => setCustomAudioCodec(e.target.value)}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                              >
+                                <option value="aac">aac</option>
+                                <option value="mp3">mp3</option>
+                                <option value="opus">opus</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Preset</label>
+                              <select
+                                value={customPreset}
+                                onChange={(e) => setCustomPreset(e.target.value)}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                              >
+                                <option value="ultrafast">ultrafast</option>
+                                <option value="superfast">superfast</option>
+                                <option value="veryfast">veryfast</option>
+                                <option value="faster">faster</option>
+                                <option value="fast">fast</option>
+                                <option value="medium">medium</option>
+                                <option value="slow">slow</option>
+                                <option value="slower">slower</option>
+                                <option value="placebo">placebo</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Profile</label>
+                              <select
+                                value={customProfile}
+                                onChange={(e) => setCustomProfile(e.target.value)}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                              >
+                                <option value="baseline">baseline</option>
+                                <option value="main">main</option>
+                                <option value="high">high</option>
+                                <option value="main10">main10</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[8px] text-zinc-500 font-bold uppercase">Pixel Format</label>
+                              <select
+                                value={customPixelFormat}
+                                onChange={(e) => setCustomPixelFormat(e.target.value)}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                              >
+                                <option value="yuv420p">yuv420p</option>
+                                <option value="yuv422p">yuv422p</option>
+                                <option value="yuv444p">yuv444p</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Rendering general validation errors if any */}
+                    {validationErrors.length > 0 && (
+                      <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2.5 space-y-1 animate-in fade-in duration-200">
+                        <span className="text-[8px] text-red-400 font-black uppercase tracking-wider block">Validation Errors</span>
+                        <ul className="list-disc pl-3 text-[9px] text-red-300 space-y-0.5">
+                          {validationErrors.map((err, i) => (
+                            <li key={i}>{err}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Resolution Profile Manager (Collapsible) */}
                   <div className="bg-zinc-950/80 rounded-xl p-3 border border-zinc-800/80 space-y-3">
                     <div 
                       onClick={() => setIsProfileManagerExpanded(!isProfileManagerExpanded)}
@@ -2855,6 +3088,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* RTMP Row */}
                 <div className="space-y-1">
@@ -3003,7 +3237,7 @@ const StreamPlayer: React.FC<StreamPlayerProps> = ({
             {/* Recording module removed */}
 
             {/* Administrator Controls */}
-            {(onEnable || onDisable || onRemove || onEdit) && (
+            {isAdmin && (onEnable || onDisable || onRemove || onEdit) && (
               <div id={`admin-controls-${stream.id}`} className="mt-4 pt-3 border-t border-zinc-800 space-y-2">
                 <div className="flex justify-between items-center">
                   <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">

@@ -60,7 +60,7 @@ const App: React.FC = () => {
   const [token, setToken] = useState<string | null>(localStorage.getItem('streampulse_jwt'));
   const [currentUser, setCurrentUser] = useState<any>(null);
   
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'deploy' | 'infra' | 'settings' | 'stream_test' | 'devices'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'streams' | 'deploy' | 'infra' | 'settings' | 'stream_test' | 'devices' | 'users'>('dashboard');
   const [streams, setStreams] = useState<StreamSession[]>([]);
   
   const [detectedPublicIp, setDetectedPublicIp] = useState<string>('Detecting...');
@@ -113,6 +113,25 @@ const App: React.FC = () => {
   const [email, setEmail] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+
+  // User Management State Hooks
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  
+  const [newUsername, setNewUsername] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newAssignedStreamId, setNewAssignedStreamId] = useState('');
+  const [createUserSuccess, setCreateUserSuccess] = useState('');
+
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [editUsername, setEditUsername] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editStatus, setEditStatus] = useState<'enabled' | 'disabled'>('enabled');
+  const [editAssignedStreamId, setEditAssignedStreamId] = useState('');
+  const [viewingHistoryUser, setViewingHistoryUser] = useState<any | null>(null);
 
   // Infrapage config tab states
   const [selectedFileKey, setSelectedFileKey] = useState<'docker-compose' | 'nginx' | 'nginx-rtmp' | 'transcode' | 'schema'>('docker-compose');
@@ -369,6 +388,125 @@ CREATE TABLE IF NOT EXISTS streams (
       console.error('Error fetching streams:', err);
     }
   }, [token]);
+
+  const fetchUsers = useCallback(async () => {
+    if (!token || !currentUser || currentUser.role !== 'admin') return;
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      const res = await fetch('/api/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUsersList(data);
+      } else {
+        setUsersError(data.error || 'Failed to fetch users');
+      }
+    } catch (err) {
+      setUsersError('Network error while fetching users');
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [token, currentUser]);
+
+  useEffect(() => {
+    if (activeTab === 'users' && currentUser?.role === 'admin') {
+      fetchUsers();
+    }
+  }, [activeTab, fetchUsers, currentUser]);
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUsername || !newEmail || !newPassword) {
+      setUsersError('Please fill out all required fields');
+      return;
+    }
+    setUsersError(null);
+    setCreateUserSuccess('');
+    try {
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          username: newUsername,
+          email: newEmail,
+          password: newPassword,
+          assigned_stream_id: newAssignedStreamId || null
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCreateUserSuccess('Channel User created successfully!');
+        setNewUsername('');
+        setNewEmail('');
+        setNewPassword('');
+        setNewAssignedStreamId('');
+        fetchUsers();
+      } else {
+        setUsersError(data.error || 'Failed to create user');
+      }
+    } catch (err) {
+      setUsersError('Network error while creating user');
+    }
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUserId) return;
+    setUsersError(null);
+    try {
+      const body: any = {
+        username: editUsername,
+        email: editEmail,
+        status: editStatus,
+        assigned_stream_id: editAssignedStreamId || null
+      };
+      if (editPassword) {
+        body.password = editPassword;
+      }
+      const res = await fetch(`/api/users/${editingUserId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEditingUserId(null);
+        setEditPassword('');
+        fetchUsers();
+      } else {
+        setUsersError(data.error || 'Failed to update user');
+      }
+    } catch (err) {
+      setUsersError('Network error while updating user');
+    }
+  };
+
+  const handleDeleteUser = async (id: number) => {
+    if (!window.confirm('Are you sure you want to delete this channel user?')) return;
+    setUsersError(null);
+    try {
+      const res = await fetch(`/api/users/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        fetchUsers();
+      } else {
+        const data = await res.json();
+        setUsersError(data.error || 'Failed to delete user');
+      }
+    } catch (err) {
+      setUsersError('Network error while deleting user');
+    }
+  };
 
   const fetchStats = useCallback(async () => {
     if (!token) return;
@@ -691,52 +829,66 @@ CREATE TABLE IF NOT EXISTS streams (
     a.click();
   };
 
-  const NavItems = () => (
-    <>
-      <button 
-        onClick={() => setActiveTab('dashboard')}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
-      >
-        <LayoutDashboard className="w-5 h-5 shrink-0" />
-        <span className="truncate">Admin Dashboard</span>
-      </button>
-      <button 
-        onClick={() => setActiveTab('devices')}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'devices' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
-      >
-        <Monitor className="w-5 h-5 shrink-0" />
-        <span className="truncate">Device Manager</span>
-      </button>
-      <button 
-        onClick={() => setActiveTab('streams')}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'streams' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
-      >
-        <Tv className="w-5 h-5 shrink-0" />
-        <span className="truncate">Public Viewers</span>
-      </button>
-      <button 
-        onClick={() => setActiveTab('stream_test')}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'stream_test' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
-      >
-        <Activity className="w-5 h-5 shrink-0" />
-        <span className="truncate">Stream Test Hub</span>
-      </button>
-      <button 
-        onClick={() => setActiveTab('deploy')}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'deploy' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
-      >
-        <Terminal className="w-5 h-5 shrink-0" />
-        <span className="truncate">VPS Setup Guide</span>
-      </button>
-      <button 
-        onClick={() => setActiveTab('infra')}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'infra' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
-      >
-        <Settings className="w-5 h-5 shrink-0" />
-        <span className="truncate">Docker configs</span>
-      </button>
-    </>
-  );
+  const NavItems = () => {
+    const isAdmin = currentUser?.role === 'admin';
+    return (
+      <>
+        <button 
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+        >
+          <LayoutDashboard className="w-5 h-5 shrink-0" />
+          <span className="truncate">{isAdmin ? 'Admin Dashboard' : 'My Channel'}</span>
+        </button>
+        {isAdmin && (
+          <>
+            <button 
+              onClick={() => setActiveTab('users')}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'users' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+            >
+              <Users className="w-5 h-5 shrink-0" />
+              <span className="truncate">User Manager</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('devices')}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'devices' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+            >
+              <Monitor className="w-5 h-5 shrink-0" />
+              <span className="truncate">Device Manager</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('streams')}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'streams' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+            >
+              <Tv className="w-5 h-5 shrink-0" />
+              <span className="truncate">Public Viewers</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('stream_test')}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'stream_test' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+            >
+              <Activity className="w-5 h-5 shrink-0" />
+              <span className="truncate">Stream Test Hub</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('deploy')}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'deploy' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+            >
+              <Terminal className="w-5 h-5 shrink-0" />
+              <span className="truncate">VPS Setup Guide</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('infra')}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === 'infra' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-400 hover:bg-zinc-900'}`}
+            >
+              <Settings className="w-5 h-5 shrink-0" />
+              <span className="truncate">Docker configs</span>
+            </button>
+          </>
+        )}
+      </>
+    );
+  };
 
   // Unauthenticated login overlay
   if (!token) {
@@ -847,69 +999,74 @@ CREATE TABLE IF NOT EXISTS streams (
 
           <NavItems />
 
-          <div className="mt-4 pt-4 border-t border-zinc-800">
-            <h4 className="px-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4">Detected Addresses</h4>
-            <div className="px-4 mb-6 space-y-3">
-              <div className="flex flex-col gap-1 text-xs text-zinc-300 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
-                <div className="flex items-center gap-2">
-                  <Globe className="w-3.5 h-3.5 text-blue-500" />
-                  <span className="font-mono text-[11px] truncate">{detectedPublicIp}</span>
+          {currentUser?.role === 'admin' && (
+            <>
+              <div className="mt-4 pt-4 border-t border-zinc-800">
+                <h4 className="px-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4">Detected Addresses</h4>
+                <div className="px-4 mb-6 space-y-3">
+                  <div className="flex flex-col gap-1 text-xs text-zinc-300 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+                    <div className="flex items-center gap-2">
+                      <Globe className="w-3.5 h-3.5 text-blue-500" />
+                      <span className="font-mono text-[11px] truncate">{detectedPublicIp}</span>
+                    </div>
+                    <span className="text-[9px] text-zinc-500 uppercase tracking-tighter font-bold">Public Node</span>
+                  </div>
+                  <div className="flex flex-col gap-1 text-xs text-zinc-300 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+                    <div className="flex items-center gap-2">
+                      <Network className="w-3.5 h-3.5 text-orange-500" />
+                      <span className="font-mono text-[11px] truncate">{detectedLanIp}</span>
+                    </div>
+                    <span className="text-[9px] text-zinc-500 uppercase tracking-tighter font-bold">Local LAN IP</span>
+                  </div>
                 </div>
-                <span className="text-[9px] text-zinc-500 uppercase tracking-tighter font-bold">Public Node</span>
-              </div>
-              <div className="flex flex-col gap-1 text-xs text-zinc-300 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
-                <div className="flex items-center gap-2">
-                  <Network className="w-3.5 h-3.5 text-orange-500" />
-                  <span className="font-mono text-[11px] truncate">{detectedLanIp}</span>
-                </div>
-                <span className="text-[9px] text-zinc-500 uppercase tracking-tighter font-bold">Local LAN IP</span>
-              </div>
-            </div>
 
-            <h4 className="px-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4">Server Resources</h4>
-            <div className="px-4 space-y-4">
-               <div>
-                 <div className="flex justify-between text-xs mb-1.5">
-                   <span className="text-zinc-400 flex items-center gap-1"><Cpu className="w-3 h-3"/> CPU ({stats.cpuCores} Cores)</span>
-                   <span className="text-zinc-200">{stats.cpuUsage?.toFixed(1)}%</span>
-                 </div>
-                 <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${stats.cpuUsage}%` }} />
-                 </div>
-                 <span className="text-[9px] text-zinc-600 block mt-1 truncate">{stats.cpuModel}</span>
-               </div>
-               <div>
-                 <div className="flex justify-between text-xs mb-1.5">
-                   <span className="text-zinc-400 flex items-center gap-1"><HardDrive className="w-3 h-3"/> RAM</span>
-                   <span className="text-zinc-200">{stats.memoryUsage?.toFixed(1)} GB / {stats.memoryTotal?.toFixed(1)} GB</span>
-                 </div>
-                 <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${stats.memoryUsagePct}%` }} />
-                 </div>
-               </div>
-               <div>
-                 <div className="flex justify-between text-xs mb-1.5">
-                   <span className="text-zinc-400 flex items-center gap-1"><LayoutDashboard className="w-3 h-3"/> Disk Storage</span>
-                   <span className="text-zinc-200">{stats.diskUsagePct}%</span>
-                 </div>
-                 <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${stats.diskUsagePct}%` }} />
-                 </div>
-               </div>
-            </div>
-          </div>
+                <h4 className="px-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4">Server Resources</h4>
+                <div className="px-4 space-y-4">
+                   <div>
+                     <div className="flex justify-between text-xs mb-1.5">
+                       <span className="text-zinc-400 flex items-center gap-1"><Cpu className="w-3 h-3"/> CPU ({stats.cpuCores} Cores)</span>
+                       <span className="text-zinc-200">{stats.cpuUsage?.toFixed(1)}%</span>
+                     </div>
+                     <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${stats.cpuUsage}%` }} />
+                     </div>
+                     <span className="text-[9px] text-zinc-600 block mt-1 truncate">{stats.cpuModel}</span>
+                   </div>
+                   <div>
+                     <div className="flex justify-between text-xs mb-1.5">
+                       <span className="text-zinc-400 flex items-center gap-1"><HardDrive className="w-3 h-3"/> RAM</span>
+                       <span className="text-zinc-200">{stats.memoryUsage?.toFixed(1)} GB / {stats.memoryTotal?.toFixed(1)} GB</span>
+                     </div>
+                     <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${stats.memoryUsagePct}%` }} />
+                     </div>
+                   </div>
+                   <div>
+                     <div className="flex justify-between text-xs mb-1.5">
+                       <span className="text-zinc-400 flex items-center gap-1"><LayoutDashboard className="w-3 h-3"/> Disk Storage</span>
+                       <span className="text-zinc-200">{stats.diskUsagePct}%</span>
+                     </div>
+                     <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${stats.diskUsagePct}%` }} />
+                     </div>
+                   </div>
+                </div>
+              </div>
+            </>
+          )}
         </aside>
 
         {/* Content Area */}
         <div className="flex-1 space-y-8 min-w-0">
           {activeTab === 'dashboard' && (
             <>
-              <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-sm">
+              {currentUser?.role === 'admin' && (
+                <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                    <PlusCircle className="w-5 h-5 text-blue-500" />
-                    <h2 className="text-xl font-bold">Create Ingest Point</h2>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <PlusCircle className="w-5 h-5 text-blue-500" />
+                  <h2 className="text-xl font-bold">Create Ingest Point</h2>
+                </div>
                   <div className="flex items-center gap-2 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
                      <button 
                         onClick={() => setNewStreamData(prev => ({ ...prev, isScheduled: false }))}
@@ -1152,6 +1309,7 @@ CREATE TABLE IF NOT EXISTS streams (
                   <span className="text-[11px] font-mono text-blue-400 font-bold truncate">rtmp://{getEffectiveIp(creationIpMode)}/live</span>
                 </div>
               </section>
+              )}
 
               <section className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -1200,53 +1358,305 @@ CREATE TABLE IF NOT EXISTS streams (
               </section>
 
               {/* Administrator Audit Log */}
-              <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-sm">
+              {currentUser?.role === 'admin' && (
+                <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-zinc-400" /> Administrator Audit Logs
-                  </h3>
-                  <button 
-                    onClick={fetchActionLogs}
-                    className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors"
-                    title="Refresh logs"
-                  >
-                    <RefreshCcw className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="bg-zinc-950 rounded-xl border border-zinc-800/80 divide-y divide-zinc-850 max-h-[250px] overflow-y-auto pr-1 text-xs font-mono">
-                  {actionLogs.length === 0 ? (
-                    <div className="p-4 text-center text-zinc-500 font-sans">
-                      No stream state modifications recorded.
-                    </div>
-                  ) : (
-                    actionLogs.map((log) => (
-                      <div key={log.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-zinc-900/40 transition-colors">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
-                              log.action === 'enable' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
-                              log.action === 'disable' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                              log.action === 'disabled_reject' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : 'bg-zinc-800 text-zinc-400'
-                            }`}>
-                              {log.action}
-                            </span>
-                            <span className="text-zinc-300 font-bold">"{log.streamTitle}"</span>
-                          </div>
-                          <p className="text-[10px] text-zinc-500 leading-normal font-sans">
-                            {log.details}
-                          </p>
-                        </div>
-                        <div className="text-[10px] text-zinc-500 text-right shrink-0 flex flex-col sm:items-end gap-0.5 font-sans">
-                          <span className="font-mono text-zinc-400">By: <strong className="text-zinc-300">{log.user}</strong></span>
-                          <span>IP: {log.ip}</span>
-                          <span>{new Date(log.timestamp).toLocaleString()}</span>
-                        </div>
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-zinc-400" /> Administrator Audit Logs
+                    </h3>
+                    <button 
+                      onClick={fetchActionLogs}
+                      className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors"
+                      title="Refresh logs"
+                    >
+                      <RefreshCcw className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="bg-zinc-950 rounded-xl border border-zinc-800/80 divide-y divide-zinc-850 max-h-[250px] overflow-y-auto pr-1 text-xs font-mono">
+                    {actionLogs.length === 0 ? (
+                      <div className="p-4 text-center text-zinc-500 font-sans">
+                        No stream state modifications recorded.
                       </div>
-                    ))
+                    ) : (
+                      actionLogs.map((log) => (
+                        <div key={log.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-zinc-900/40 transition-colors">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+                                log.action === 'enable' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
+                                log.action === 'disable' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                                log.action === 'disabled_reject' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : 'bg-zinc-800 text-zinc-400'
+                              }`}>
+                                {log.action}
+                              </span>
+                              <span className="text-zinc-300 font-bold">"{log.streamTitle}"</span>
+                            </div>
+                            <p className="text-[10px] text-zinc-500 leading-normal font-sans">
+                              {log.details}
+                            </p>
+                          </div>
+                          <div className="text-[10px] text-zinc-500 text-right shrink-0 flex flex-col sm:items-end gap-0.5 font-sans">
+                            <span className="font-mono text-zinc-400">By: <strong className="text-zinc-300">{log.user}</strong></span>
+                            <span>IP: {log.ip}</span>
+                            <span>{new Date(log.timestamp).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {activeTab === 'users' && currentUser?.role === 'admin' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="flex flex-col gap-2">
+                <h2 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
+                  <Users className="w-8 h-8 text-blue-500" /> Channel User Accounts
+                </h2>
+                <p className="text-zinc-400 text-sm">Create and manage dedicated logins, reset passwords, enable/disable access, and assign accounts to specific channels.</p>
+              </div>
+
+              {usersError && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  {usersError}
+                </div>
+              )}
+
+              {createUserSuccess && (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-sm font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 shrink-0" />
+                  {createUserSuccess}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Create User Card */}
+                <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-sm h-fit">
+                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                    <Plus className="w-5 h-5 text-zinc-400" /> Create Channel Login
+                  </h3>
+                  <form onSubmit={handleCreateUser} className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Username</label>
+                      <input 
+                        type="text" required value={newUsername} onChange={(e) => setNewUsername(e.target.value)}
+                        placeholder="e.g. broadcaster_alpha"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100 font-medium"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Email Address</label>
+                      <input 
+                        type="email" required value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
+                        placeholder="e.g. broadcaster@streampulse.io"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100 font-medium"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Password</label>
+                      <input 
+                        type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="••••••••••••"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100 font-medium"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Assign Channel</label>
+                      <select 
+                        value={newAssignedStreamId} onChange={(e) => setNewAssignedStreamId(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none text-zinc-100 font-medium"
+                      >
+                        <option value="">-- No Channel Assigned --</option>
+                        {streams.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.title} (@{s.broadcaster})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button type="submit" className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-lg shadow-blue-900/25">
+                      Create Login Account
+                    </button>
+                  </form>
+                </div>
+
+                {/* Users List Directory */}
+                <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-sm">
+                  <h3 className="text-lg font-bold mb-4 flex items-center justify-between">
+                    <span>Active Directory</span>
+                    <button onClick={fetchUsers} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors">
+                      <RefreshCcw className="w-4 h-4" />
+                    </button>
+                  </h3>
+
+                  {usersLoading ? (
+                    <div className="p-8 text-center text-zinc-500">Loading directory...</div>
+                  ) : usersList.length === 0 ? (
+                    <div className="p-8 text-center text-zinc-500">No channel users found.</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {usersList.map((user) => {
+                        const assignedStream = streams.find(s => s.id === user.assigned_stream_id);
+                        const isEditing = editingUserId === user.id;
+
+                        return (
+                          <div key={user.id} className="p-4 bg-zinc-950 border border-zinc-850 rounded-xl space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-zinc-100">{user.username}</span>
+                                  {user.role === 'admin' && (
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">ADMIN</span>
+                                  )}
+                                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${user.status === 'disabled' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                                    {user.status || 'enabled'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-zinc-400">{user.email}</p>
+                              </div>
+
+                              {user.role !== 'admin' && (
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button 
+                                    onClick={() => {
+                                      setEditingUserId(user.id);
+                                      setEditUsername(user.username);
+                                      setEditEmail(user.email);
+                                      setEditStatus(user.status || 'enabled');
+                                      setEditAssignedStreamId(user.assigned_stream_id || '');
+                                    }}
+                                    className="px-2.5 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold rounded-lg transition-all"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDeleteUser(user.id)}
+                                    className="px-2.5 py-1 text-xs bg-red-950/40 hover:bg-red-900/30 text-red-400 border border-red-900/20 font-bold rounded-lg transition-all"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-2 border-t border-zinc-900">
+                              <div>
+                                <span className="text-zinc-500 font-bold uppercase text-[9px] block mb-0.5">Assigned Channel</span>
+                                <span className={assignedStream ? 'text-blue-400 font-semibold' : 'text-zinc-500 italic font-medium'}>
+                                  {assignedStream ? `${assignedStream.title} (@${assignedStream.broadcaster})` : 'Unassigned'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <div>
+                                  <span className="text-zinc-500 font-bold uppercase text-[9px] block mb-0.5">Login History</span>
+                                  <span className="text-zinc-400 font-medium">
+                                    {user.login_history && user.login_history.length > 0 
+                                      ? `${user.login_history.length} logins recorded` 
+                                      : 'No login records'}
+                                  </span>
+                                </div>
+                                {user.login_history && user.login_history.length > 0 && (
+                                  <button 
+                                    onClick={() => setViewingHistoryUser(viewingHistoryUser?.id === user.id ? null : user)}
+                                    className="text-xs text-blue-500 hover:underline font-bold"
+                                  >
+                                    {viewingHistoryUser?.id === user.id ? 'Hide Logs' : 'View Logs'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Viewing Login History Dropdown */}
+                            {viewingHistoryUser?.id === user.id && (
+                              <div className="mt-3 p-3 bg-zinc-950 border border-zinc-900 rounded-lg max-h-[150px] overflow-y-auto space-y-1.5 text-[11px] font-mono">
+                                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1 font-sans">Recent Logins (IP & Time)</p>
+                                {user.login_history.map((log: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between text-zinc-400 border-b border-zinc-900/50 pb-1 last:border-0 last:pb-0">
+                                    <span>IP: {log.ip || 'Unknown'}</span>
+                                    <span>{new Date(log.timestamp).toLocaleString()}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Inline Edit Form */}
+                            {isEditing && (
+                              <form onSubmit={handleUpdateUser} className="mt-4 p-4 bg-zinc-900 border border-zinc-800 rounded-xl space-y-3">
+                                <div className="flex justify-between items-center mb-1">
+                                  <h4 className="text-xs font-bold text-zinc-300">Edit User Account: {user.username}</h4>
+                                  <button type="button" onClick={() => setEditingUserId(null)} className="text-zinc-500 hover:text-zinc-300">
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] font-bold text-zinc-500 uppercase">Username</label>
+                                    <input 
+                                      type="text" required value={editUsername} onChange={(e) => setEditUsername(e.target.value)}
+                                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] font-bold text-zinc-500 uppercase">Email</label>
+                                    <input 
+                                      type="email" required value={editEmail} onChange={(e) => setEditEmail(e.target.value)}
+                                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] font-bold text-zinc-500 uppercase">Reset Password (Optional)</label>
+                                    <input 
+                                      type="password" value={editPassword} onChange={(e) => setEditPassword(e.target.value)}
+                                      placeholder="Leave blank to keep same"
+                                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] font-bold text-zinc-500 uppercase">Account Status</label>
+                                    <select 
+                                      value={editStatus} onChange={(e: any) => setEditStatus(e.target.value)}
+                                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none"
+                                    >
+                                      <option value="enabled">Enabled</option>
+                                      <option value="disabled">Disabled</option>
+                                    </select>
+                                  </div>
+                                  <div className="space-y-1 sm:col-span-2">
+                                    <label className="text-[9px] font-bold text-zinc-500 uppercase">Assign Channel</label>
+                                    <select 
+                                      value={editAssignedStreamId} onChange={(e) => setEditAssignedStreamId(e.target.value)}
+                                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none"
+                                    >
+                                      <option value="">-- No Channel Assigned --</option>
+                                      {streams.map(s => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.title} (@{s.broadcaster})
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                                <div className="flex justify-end gap-2 pt-2">
+                                  <button type="button" onClick={() => setEditingUserId(null)} className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-750 text-zinc-300 font-bold rounded-lg">
+                                    Cancel
+                                  </button>
+                                  <button type="submit" className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg">
+                                    Save Changes
+                                  </button>
+                                </div>
+                              </form>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-              </section>
-            </>
+              </div>
+            </div>
           )}
 
           {activeTab === 'streams' && (
@@ -1262,7 +1672,7 @@ CREATE TABLE IF NOT EXISTS streams (
                     stream={stream} 
                     onEdit={(updated) => handleEditStream(stream.id, updated)}
                     onCloneProfile={(config) => handleCloneProfile(stream.id, config)}
-                    isAdmin={currentUser?.role === 'admin'}
+                    isAdmin={true}
                   />
                 ))}
               </div>
@@ -1430,7 +1840,8 @@ CREATE TABLE IF NOT EXISTS streams (
       </main>
 
       {/* Mobile Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-zinc-900/90 backdrop-blur-xl border-t border-zinc-800 flex items-center justify-around px-2 py-3 lg:hidden z-[60] shadow-[0_-8px_30px_rgb(0,0,0,0.12)]">
+      {currentUser?.role === 'admin' && (
+        <nav className="fixed bottom-0 left-0 right-0 bg-zinc-900/90 backdrop-blur-xl border-t border-zinc-800 flex items-center justify-around px-2 py-3 lg:hidden z-[60] shadow-[0_-8px_30px_rgb(0,0,0,0.12)]">
         <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 flex-1 ${activeTab === 'dashboard' ? 'text-blue-500' : 'text-zinc-500'}`}>
           <LayoutDashboard className="w-5 h-5" />
           <span className="text-[9px] font-bold uppercase">Admin</span>
@@ -1456,6 +1867,7 @@ CREATE TABLE IF NOT EXISTS streams (
           <span className="text-[9px] font-bold uppercase">Configs</span>
         </button>
       </nav>
+      )}
 
       {confirmRemovalId && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">

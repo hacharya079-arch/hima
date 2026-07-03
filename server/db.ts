@@ -19,6 +19,9 @@ export interface UserRecord {
   password_hash: string;
   role: 'admin' | 'user';
   created_at: string;
+  status?: 'enabled' | 'disabled';
+  assigned_stream_id?: string | null;
+  login_history?: string | null;
 }
 
 export interface StreamRecord {
@@ -279,6 +282,10 @@ export const db = {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           );
 
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'enabled';
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_stream_id VARCHAR(50);
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS login_history TEXT;
+
           CREATE TABLE IF NOT EXISTS streams (
             id VARCHAR(50) PRIMARY KEY,
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -434,18 +441,59 @@ export const db = {
         email: r.email,
         password_hash: r.password_hash,
         role: r.role,
-        created_at: r.created_at.toISOString()
+        created_at: r.created_at.toISOString(),
+        status: r.status || 'enabled',
+        assigned_stream_id: r.assigned_stream_id || null,
+        login_history: r.login_history || null
       };
     }
     const user = localState.users.find(u => u.username.toLowerCase() === username.toLowerCase());
     return user || null;
   },
 
+  getUserById: async (id: number): Promise<UserRecord | null> => {
+    if (usePostgres && pgPool) {
+      const res = await pgPool.query('SELECT * FROM users WHERE id = $1', [id]);
+      if (res.rows.length === 0) return null;
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        username: r.username,
+        email: r.email,
+        password_hash: r.password_hash,
+        role: r.role,
+        created_at: r.created_at.toISOString(),
+        status: r.status || 'enabled',
+        assigned_stream_id: r.assigned_stream_id || null,
+        login_history: r.login_history || null
+      };
+    }
+    return localState.users.find(u => u.id === id) || null;
+  },
+
+  getUsers: async (): Promise<UserRecord[]> => {
+    if (usePostgres && pgPool) {
+      const res = await pgPool.query('SELECT * FROM users ORDER BY username ASC');
+      return res.rows.map(r => ({
+        id: r.id,
+        username: r.username,
+        email: r.email,
+        password_hash: r.password_hash,
+        role: r.role,
+        created_at: r.created_at.toISOString(),
+        status: r.status || 'enabled',
+        assigned_stream_id: r.assigned_stream_id || null,
+        login_history: r.login_history || null
+      }));
+    }
+    return localState.users;
+  },
+
   createUser: async (username: string, email: string, passwordHash: string, role: 'admin' | 'user' = 'user'): Promise<UserRecord> => {
     if (usePostgres && pgPool) {
       const res = await pgPool.query(
-        'INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING *',
-        [username, email, passwordHash, role]
+        'INSERT INTO users (username, email, password_hash, role, status, assigned_stream_id, login_history) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+        [username, email, passwordHash, role, 'enabled', null, null]
       );
       const r = res.rows[0];
       return {
@@ -454,7 +502,10 @@ export const db = {
         email: r.email,
         password_hash: r.password_hash,
         role: r.role,
-        created_at: r.created_at.toISOString()
+        created_at: r.created_at.toISOString(),
+        status: r.status || 'enabled',
+        assigned_stream_id: r.assigned_stream_id || null,
+        login_history: r.login_history || null
       };
     }
     const newUser: UserRecord = {
@@ -463,11 +514,110 @@ export const db = {
       email,
       password_hash: passwordHash,
       role,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      status: 'enabled',
+      assigned_stream_id: null,
+      login_history: null
     };
     localState.users.push(newUser);
     saveLocalState();
     return newUser;
+  },
+
+  updateUser: async (id: number, updates: Partial<UserRecord>): Promise<UserRecord | null> => {
+    if (usePostgres && pgPool) {
+      const keys = Object.keys(updates);
+      if (keys.length === 0) return null;
+
+      const setClause = keys.map((key, index) => {
+        const pgKey = key === 'password_hash' ? 'password_hash' :
+                      key === 'assigned_stream_id' ? 'assigned_stream_id' :
+                      key === 'login_history' ? 'login_history' : key;
+        return `${pgKey} = $${index + 2}`;
+      }).join(', ');
+
+      const vals = keys.map(k => (updates as any)[k]);
+      await pgPool.query(`UPDATE users SET ${setClause} WHERE id = $1`, [id, ...vals]);
+      const res = await pgPool.query('SELECT * FROM users WHERE id = $1', [id]);
+      if (res.rows.length === 0) return null;
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        username: r.username,
+        email: r.email,
+        password_hash: r.password_hash,
+        role: r.role,
+        created_at: r.created_at.toISOString(),
+        status: r.status || 'enabled',
+        assigned_stream_id: r.assigned_stream_id || null,
+        login_history: r.login_history || null
+      };
+    }
+
+    const index = localState.users.findIndex(u => u.id === id);
+    if (index === -1) return null;
+    localState.users[index] = { ...localState.users[index], ...updates };
+    saveLocalState();
+    return localState.users[index];
+  },
+
+  deleteUser: async (id: number): Promise<boolean> => {
+    if (usePostgres && pgPool) {
+      const res = await pgPool.query('DELETE FROM users WHERE id = $1', [id]);
+      return (res.rowCount ?? 0) > 0;
+    }
+    const lenBefore = localState.users.length;
+    localState.users = localState.users.filter(u => u.id !== id);
+    if (localState.users.length !== lenBefore) {
+      saveLocalState();
+      return true;
+    }
+    return false;
+  },
+
+  recordUserLogin: async (userId: number, ip: string): Promise<void> => {
+    const timestamp = new Date().toISOString();
+    const loginRecord = { timestamp, ip };
+
+    let currentHistoryRaw: string | null = null;
+    if (usePostgres && pgPool) {
+      const res = await pgPool.query('SELECT login_history FROM users WHERE id = $1', [userId]);
+      if (res.rows.length > 0) {
+        currentHistoryRaw = res.rows[0].login_history;
+      }
+    } else {
+      const user = localState.users.find(u => u.id === userId);
+      if (user) {
+        currentHistoryRaw = user.login_history || null;
+      }
+    }
+
+    let historyList: any[] = [];
+    if (currentHistoryRaw) {
+      try {
+        historyList = JSON.parse(currentHistoryRaw);
+        if (!Array.isArray(historyList)) {
+          historyList = [];
+        }
+      } catch (e) {
+        historyList = [];
+      }
+    }
+    historyList.unshift(loginRecord);
+    if (historyList.length > 50) {
+      historyList = historyList.slice(0, 50);
+    }
+
+    const updatedHistoryRaw = JSON.stringify(historyList);
+    if (usePostgres && pgPool) {
+      await pgPool.query('UPDATE users SET login_history = $1 WHERE id = $2', [updatedHistoryRaw, userId]);
+    } else {
+      const index = localState.users.findIndex(u => u.id === userId);
+      if (index !== -1) {
+        localState.users[index].login_history = updatedHistoryRaw;
+        saveLocalState();
+      }
+    }
   },
 
   // STREAMS

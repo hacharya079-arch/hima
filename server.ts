@@ -616,6 +616,43 @@ segment3.ts
     });
   };
 
+  const requireAdmin = (req: any, res: any, next: any) => {
+    if (!req.user || req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied: Administrator privileges required' });
+    }
+    next();
+  };
+
+  const requireStreamOwnership = async (req: any, res: any, next: any) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    if (req.user.role === 'admin') {
+      return next();
+    }
+
+    try {
+      const dbUser = await db.getUserById(req.user.id);
+      if (!dbUser || dbUser.status === 'disabled') {
+        return res.status(403).json({ error: 'Access denied: Account is disabled' });
+      }
+
+      const streamId = req.params.id || req.params.streamId || req.body.id || req.query.id;
+      if (!streamId) {
+        return res.status(400).json({ error: 'Stream identifier required' });
+      }
+
+      if (dbUser.assigned_stream_id !== streamId) {
+        return res.status(403).json({ error: 'Access denied: You are not authorized to access this channel' });
+      }
+
+      next();
+    } catch (err) {
+      console.error('Error in requireStreamOwnership middleware:', err);
+      res.status(500).json({ error: 'Internal server authorization error' });
+    }
+  };
+
   // ----------------------------------------------------
   // AUTH API ENDPOINTS
   // ----------------------------------------------------
@@ -644,7 +681,9 @@ segment3.ts
           username: newUser.username,
           email: newUser.email,
           role: newUser.role,
-          createdAt: newUser.created_at
+          createdAt: newUser.created_at,
+          status: newUser.status || 'enabled',
+          assigned_stream_id: newUser.assigned_stream_id || null
         }
       });
     } catch (err: any) {
@@ -665,10 +704,17 @@ segment3.ts
         return res.status(400).json({ error: 'Invalid username or password' });
       }
 
+      if (user.status === 'disabled') {
+        return res.status(403).json({ error: 'Access denied: Your account is currently disabled' });
+      }
+
       const isMatch = await bcrypt.compare(password, user.password_hash);
       if (!isMatch) {
         return res.status(400).json({ error: 'Invalid username or password' });
       }
+
+      // Record user login details
+      await db.recordUserLogin(user.id, req.ip || '0.0.0.0');
 
       const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
 
@@ -679,7 +725,9 @@ segment3.ts
           username: user.username,
           email: user.email,
           role: user.role,
-          createdAt: user.created_at
+          createdAt: user.created_at,
+          status: user.status || 'enabled',
+          assigned_stream_id: user.assigned_stream_id || null
         }
       });
     } catch (err) {
@@ -699,7 +747,9 @@ segment3.ts
         username: user.username,
         email: user.email,
         role: user.role,
-        createdAt: user.created_at
+        createdAt: user.created_at,
+        status: user.status || 'enabled',
+        assigned_stream_id: user.assigned_stream_id || null
       });
     } catch (err) {
       res.status(500).json({ error: 'Server error' });
@@ -707,13 +757,161 @@ segment3.ts
   });
 
   // ----------------------------------------------------
+  // USER MANAGEMENT API ENDPOINTS (ADMIN ONLY)
+  // ----------------------------------------------------
+  app.get('/api/users', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+      const users = await db.getUsers();
+      const sanitized = users.map(u => ({
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        role: u.role,
+        created_at: u.created_at,
+        status: u.status || 'enabled',
+        assigned_stream_id: u.assigned_stream_id || null,
+        login_history: u.login_history || null
+      }));
+      res.json(sanitized);
+    } catch (err) {
+      console.error('Error fetching users:', err);
+      res.status(500).json({ error: 'Failed to fetch users' });
+    }
+  });
+
+  app.post('/api/users', authenticateToken, requireAdmin, async (req, res) => {
+    const { username, email, password, assigned_stream_id } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email, and password are required' });
+    }
+
+    try {
+      const existingUser = await db.getUserByUsername(username);
+      if (existingUser) {
+        return res.status(400).json({ error: 'Username already exists' });
+      }
+
+      const salt = await bcrypt.genSalt(10);
+      const passwordHash = await bcrypt.hash(password, salt);
+
+      const newUser = await db.createUser(username, email, passwordHash, 'user');
+      
+      if (assigned_stream_id) {
+        await db.updateUser(newUser.id, { assigned_stream_id });
+        newUser.assigned_stream_id = assigned_stream_id;
+      }
+
+      res.status(201).json({
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        role: newUser.role,
+        created_at: newUser.created_at,
+        status: newUser.status || 'enabled',
+        assigned_stream_id: newUser.assigned_stream_id || null
+      });
+    } catch (err) {
+      console.error('Error creating user:', err);
+      res.status(500).json({ error: 'Failed to create user' });
+    }
+  });
+
+  app.put('/api/users/:id', authenticateToken, requireAdmin, async (req: any, res) => {
+    const userId = parseInt(req.params.id, 10);
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    const { username, email, password, status, assigned_stream_id } = req.body;
+
+    try {
+      const user = await db.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const updates: Partial<any> = {};
+      if (username) {
+        const other = await db.getUserByUsername(username);
+        if (other && other.id !== userId) {
+          return res.status(400).json({ error: 'Username already in use' });
+        }
+        updates.username = username;
+      }
+      if (email) {
+        updates.email = email;
+      }
+      if (password) {
+        const salt = await bcrypt.genSalt(10);
+        updates.password_hash = await bcrypt.hash(password, salt);
+      }
+      if (status) {
+        if (status !== 'enabled' && status !== 'disabled') {
+          return res.status(400).json({ error: 'Invalid status value' });
+        }
+        updates.status = status;
+      }
+      if (assigned_stream_id !== undefined) {
+        updates.assigned_stream_id = assigned_stream_id;
+      }
+
+      const updated = await db.updateUser(userId, updates);
+      if (!updated) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.json({
+        id: updated.id,
+        username: updated.username,
+        email: updated.email,
+        role: updated.role,
+        created_at: updated.created_at,
+        status: updated.status || 'enabled',
+        assigned_stream_id: updated.assigned_stream_id || null
+      });
+    } catch (err) {
+      console.error('Error updating user:', err);
+      res.status(500).json({ error: 'Failed to update user' });
+    }
+  });
+
+  app.delete('/api/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+    const userId = parseInt(req.params.id, 10);
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    try {
+      const success = await db.deleteUser(userId);
+      if (!success) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json({ message: 'User deleted successfully' });
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      res.status(500).json({ error: 'Failed to delete user' });
+    }
+  });
+
+  // ----------------------------------------------------
   // STREAM MANAGEMENT API ENDPOINTS
   // ----------------------------------------------------
-  app.get('/api/streams', authenticateToken, async (req, res) => {
+  app.get('/api/streams', authenticateToken, async (req: any, res) => {
     try {
+      const dbUser = await db.getUserById(req.user.id);
+      if (!dbUser || dbUser.status === 'disabled') {
+        return res.status(403).json({ error: 'Access denied: Account is disabled' });
+      }
+
       const streams = await db.getStreams();
-      res.json(streams);
+      if (req.user.role === 'admin') {
+        res.json(streams);
+      } else {
+        const filtered = streams.filter(s => s.id === dbUser.assigned_stream_id);
+        res.json(filtered);
+      }
     } catch (err) {
+      console.error('Error fetching streams:', err);
       res.status(500).json({ error: 'Failed to fetch streams' });
     }
   });
@@ -736,7 +934,7 @@ segment3.ts
     }
   });
 
-  app.post('/api/streams', authenticateToken, async (req: any, res) => {
+  app.post('/api/streams', authenticateToken, requireAdmin, async (req: any, res) => {
     const { title, broadcaster, resolution, scheduledStart } = req.body;
     if (!title || !broadcaster) {
       return res.status(400).json({ error: 'Title and broadcaster are required' });
@@ -797,7 +995,21 @@ segment3.ts
     }
   });
 
-  app.put('/api/streams/:id', authenticateToken, async (req, res) => {
+  app.put('/api/streams/:id', authenticateToken, requireStreamOwnership, async (req: any, res) => {
+    const isChannelUser = req.user.role !== 'admin';
+    if (isChannelUser) {
+      const { title, broadcaster } = req.body;
+      try {
+        const stream = await db.updateStream(req.params.id, { title, broadcaster });
+        if (!stream) {
+          return res.status(404).json({ error: 'Stream not found' });
+        }
+        return res.json(stream);
+      } catch (err) {
+        return res.status(500).json({ error: 'Failed to update stream' });
+      }
+    }
+
     const { 
       resolution, width, height, fps, bitrate, videoCodec, audioCodec,
       gopSize, bufferSize, maxBitrate, audioVolume, audioSampleRate, audioDelay
@@ -894,7 +1106,7 @@ segment3.ts
     }
   });
 
-  app.delete('/api/streams/:id', authenticateToken, async (req, res) => {
+  app.delete('/api/streams/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const success = await db.deleteStream(req.params.id);
       if (!success) {
@@ -906,7 +1118,7 @@ segment3.ts
     }
   });
 
-  app.delete('/api/streams/:streamId/profiles/:profileId', authenticateToken, async (req, res) => {
+  app.delete('/api/streams/:streamId/profiles/:profileId', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { streamId, profileId } = req.params;
       console.log(`[Streaming Engine] Received request to delete profile ${profileId} from stream ${streamId}`);
@@ -965,7 +1177,7 @@ segment3.ts
   });
 
   // Regenerate Stream Key
-  app.post('/api/streams/:id/regenerate', authenticateToken, async (req, res) => {
+  app.post('/api/streams/:id/regenerate', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const newStreamKey = 'live_' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
       const stream = await db.updateStream(req.params.id, { streamKey: newStreamKey });
@@ -979,7 +1191,7 @@ segment3.ts
   });
 
   // Toggle Stream Enable/Disable (Offline vs Disabled)
-  app.post('/api/streams/:id/toggle', authenticateToken, async (req, res) => {
+  app.post('/api/streams/:id/toggle', authenticateToken, requireStreamOwnership, async (req, res) => {
     const { status } = req.body;
     if (status !== 'offline' && status !== 'disabled' && status !== 'live') {
       return res.status(400).json({ error: 'Invalid status toggle option' });
@@ -1083,7 +1295,7 @@ segment3.ts
   });
 
   // GET Action logs
-  app.get('/api/system/logs', authenticateToken, async (req: any, res) => {
+  app.get('/api/system/logs', authenticateToken, requireAdmin, async (req: any, res) => {
     try {
       const LOG_FILE = path.resolve('./data/stream_action_logs.json');
       if (fs.existsSync(LOG_FILE)) {
@@ -1420,7 +1632,7 @@ segment3.ts
   }
 
   // GET all devices
-  app.get('/api/devices', authenticateToken, async (req, res) => {
+  app.get('/api/devices', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const devices = await db.getDevices();
       res.json(devices);
@@ -1431,7 +1643,7 @@ segment3.ts
   });
 
   // GET single device
-  app.get('/api/devices/:id', authenticateToken, async (req, res) => {
+  app.get('/api/devices/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const device = await db.getDevice(req.params.id);
       if (!device) return res.status(404).json({ error: 'Device not found' });
@@ -1443,7 +1655,7 @@ segment3.ts
   });
 
   // CREATE / pre-register device manually
-  app.post('/api/devices', authenticateToken, async (req, res) => {
+  app.post('/api/devices', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { name, location, description } = req.body;
       if (!name) return res.status(400).json({ error: 'Device name is required' });
@@ -1467,7 +1679,7 @@ segment3.ts
   });
 
   // UPDATE device metadata (name, location, description)
-  app.put('/api/devices/:id', authenticateToken, async (req, res) => {
+  app.put('/api/devices/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { name, location, description } = req.body;
       const deviceId = req.params.id;
@@ -1488,7 +1700,7 @@ segment3.ts
   });
 
   // DELETE device
-  app.delete('/api/devices/:id', authenticateToken, async (req, res) => {
+  app.delete('/api/devices/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const deleted = await db.deleteDevice(req.params.id);
       if (!deleted) return res.status(404).json({ error: 'Device not found' });
@@ -1508,7 +1720,7 @@ segment3.ts
   });
 
   // PAIR a device from the Dashboard
-  app.post('/api/devices/pair', authenticateToken, async (req, res) => {
+  app.post('/api/devices/pair', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { pairingCode, name, location, description } = req.body;
       if (!pairingCode) return res.status(400).json({ error: 'Pairing code is required' });
@@ -1555,7 +1767,7 @@ segment3.ts
   });
 
   // SEND REMOTE COMMAND TO DEVICE
-  app.post('/api/devices/:id/command', authenticateToken, async (req, res) => {
+  app.post('/api/devices/:id/command', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { command, args } = req.body;
       if (!command) return res.status(400).json({ error: 'Command is required' });
@@ -1621,7 +1833,7 @@ segment3.ts
   });
 
   // UPDATE REMOTE CONFIGURATION
-  app.post('/api/devices/:id/config', authenticateToken, async (req, res) => {
+  app.post('/api/devices/:id/config', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { brightness, rotation, current_resolution, current_volume, network_settings, player_settings } = req.body;
       const deviceId = req.params.id;
@@ -1671,7 +1883,7 @@ segment3.ts
   });
 
   // TRIGGER REMOTE OTA UPDATE
-  app.post('/api/devices/:id/ota-update', authenticateToken, async (req, res) => {
+  app.post('/api/devices/:id/ota-update', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { targetVersion, updateUrl } = req.body;
       const deviceId = req.params.id;
@@ -1708,7 +1920,7 @@ segment3.ts
   });
 
   // GET logs for a device
-  app.get('/api/devices/:id/logs', authenticateToken, async (req, res) => {
+  app.get('/api/devices/:id/logs', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const logs = await db.getDeviceLogs(req.params.id);
       res.json(logs);
@@ -1719,7 +1931,7 @@ segment3.ts
   });
 
   // GET playback history for a device
-  app.get('/api/devices/:id/history', authenticateToken, async (req, res) => {
+  app.get('/api/devices/:id/history', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const history = await db.getPlaybackHistory(req.params.id);
       res.json(history);
@@ -1748,7 +1960,7 @@ segment3.ts
   });
 
   // --- DEVICE GROUPS ---
-  app.get('/api/device-groups', authenticateToken, async (req, res) => {
+  app.get('/api/device-groups', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const groups = await db.getDeviceGroups();
       const enrichedGroups = await Promise.all(groups.map(async (g) => {
@@ -1762,7 +1974,7 @@ segment3.ts
     }
   });
 
-  app.post('/api/device-groups', authenticateToken, async (req, res) => {
+  app.post('/api/device-groups', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { name, description } = req.body;
       if (!name) return res.status(400).json({ error: 'Group name is required' });
@@ -1774,7 +1986,7 @@ segment3.ts
     }
   });
 
-  app.put('/api/device-groups/:id', authenticateToken, async (req, res) => {
+  app.put('/api/device-groups/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const group = await db.updateDeviceGroup(req.params.id, req.body);
       if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -1785,7 +1997,7 @@ segment3.ts
     }
   });
 
-  app.delete('/api/device-groups/:id', authenticateToken, async (req, res) => {
+  app.delete('/api/device-groups/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
       await db.deleteDeviceGroup(req.params.id);
       res.json({ success: true });
@@ -1795,7 +2007,7 @@ segment3.ts
     }
   });
 
-  app.post('/api/device-groups/:id/members', authenticateToken, async (req, res) => {
+  app.post('/api/device-groups/:id/members', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { deviceId } = req.body;
       if (!deviceId) return res.status(400).json({ error: 'Device ID is required' });
@@ -1807,7 +2019,7 @@ segment3.ts
     }
   });
 
-  app.delete('/api/device-groups/:id/members/:deviceId', authenticateToken, async (req, res) => {
+  app.delete('/api/device-groups/:id/members/:deviceId', authenticateToken, requireAdmin, async (req, res) => {
     try {
       await db.removeDeviceFromGroup(req.params.id, req.params.deviceId);
       res.json({ success: true });
@@ -1818,7 +2030,7 @@ segment3.ts
   });
 
   // GROUP COMMAND
-  app.post('/api/device-groups/:id/command', authenticateToken, async (req, res) => {
+  app.post('/api/device-groups/:id/command', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { command, args } = req.body;
       if (!command) return res.status(400).json({ error: 'Command is required' });
@@ -1869,7 +2081,7 @@ segment3.ts
   });
 
   // --- DEVICE SCHEDULES ---
-  app.get('/api/devices/schedules', authenticateToken, async (req, res) => {
+  app.get('/api/devices/schedules', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const schedules = await db.getDeviceSchedules();
       res.json(schedules);
@@ -1879,7 +2091,7 @@ segment3.ts
     }
   });
 
-  app.post('/api/devices/schedules', authenticateToken, async (req, res) => {
+  app.post('/api/devices/schedules', authenticateToken, requireAdmin, async (req, res) => {
     try {
       const { device_id, group_id, time, action, stream_id, stream_url } = req.body;
       if (!time || !action) {
@@ -1901,7 +2113,7 @@ segment3.ts
     }
   });
 
-  app.delete('/api/devices/schedules/:id', authenticateToken, async (req, res) => {
+  app.delete('/api/devices/schedules/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
       await db.deleteDeviceSchedule(req.params.id);
       res.json({ success: true });
